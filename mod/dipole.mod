@@ -5,13 +5,14 @@
 : last rev: (SL: Added back Qtotal, which WAS used in par version)
 
 NEURON {
-    SUFFIX dipole
-    RANGE ri, ia, Q, ztan
-    POINTER pv
+    THREADSAFE
+       SUFFIX dipole
+       RANGE ri, ia, Q, ztan
+       BBCOREPOINTER pv
 
-    : for density. sums into Dipole at section position 1
-    POINTER Qsum
-    POINTER Qtotal
+       : for density. sums into Dipole at section position 1
+       BBCOREPOINTER Qsum
+       BBCOREPOINTER Qtotal
 }
 
 UNITS {
@@ -38,15 +39,24 @@ ASSIGNED {
 
 : solve for v's first then use them
 AFTER SOLVE {
-    ia = (pv - v) / ri
-    Q = ia * ztan
-    Qsum = Qsum + Q
-    Qtotal = Qtotal + Q
+VERBATIM
+    ia = (*(double *)_p_pv - v) / ri;
+    Q = ia * ztan;
+    *(double *)_p_Qsum = *(double *)_p_Qsum + Q;
+    *(double *)_p_Qtotal = *(double *)_p_Qtotal + Q;
+ENDVERBATIM
 }
 
 AFTER INITIAL {
-    ia = (pv - v) / ri
-    Q = ia * ztan
-    Qsum = Qsum + Q
-    Qtotal = Qtotal + Q
+VERBATIM
+    ia = (*(double *)_p_pv - v) / ri;
+    Q = ia * ztan;
+    *(double *)_p_Qsum = *(double *)_p_Qsum + Q;
+    *(double *)_p_Qtotal = *(double *)_p_Qtotal + Q;
+ENDVERBATIM
 }
+
+VERBATIM
+static void bbcore_write(double* x, int* d, int* xx, int *offset, _threadargsproto_){}
+static void bbcore_read(double* x, int* d, int* xx, int* offset, _threadargsproto_){}
+ENDVERBATIM

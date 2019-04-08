@@ -9,7 +9,7 @@ from numpy import convolve, hamming
 from neuron import h
 
 from .network import NetworkOnNode
-
+from .sim import pc, nhosts, rank
 
 def _hammfilt(x, winsz):
     """Convolve with a hamming window."""
@@ -18,7 +18,38 @@ def _hammfilt(x, winsz):
     return convolve(x, win, 'same')
 
 
-def simulate_dipole(params):
+def sum_currents(net):
+    """Aggregate the currents independently on each proc
+
+    This is not necessary without LFP.
+
+    Parameters
+    ----------
+    net: instance of NetworkOnNode
+        returned by NetworkOnNode(params)
+
+    Returns
+    -------
+
+    """
+
+    # bring all processes to same point
+    pc.barrier()
+
+    # runs on all processes
+    net.aggregate_currents()
+
+    # now gather from all processes
+    if nhosts > 1:
+        pc.barrier()
+        # combine net.current{} variables on each proc
+        pc.allreduce(net.current['L5Pyr_soma'], 1)
+        pc.allreduce(net.current['L2Pyr_soma'], 1)
+
+        pc.barrier()  # get all nodes to this place before continuing
+
+
+def simulate_dipole(params, write_coreneuron):
     """Simulate a dipole given the experiment parameters.
 
     Parameters
@@ -31,16 +62,38 @@ def simulate_dipole(params):
     dpl: instance of Dipole
         The dipole object
     """
-    pc = h.ParallelContext(1)
 
-    # global variables, should be node-independent
-    h("dp_total_L2 = 0.")
-    h("dp_total_L5 = 0.")
+    # initialization
+    fih = [] #list of func init handlers
+
+    if write_coreneuron:
+        h.cvode.cache_efficient(1)
 
     # Set tstop before instantiating any classes
     h.tstop = params['tstop']
     h.dt = params['dt']  # simulation duration and time-step
     h.celsius = params['celsius']  # 37.0 - set temperature
+
+    # sets the default max solver step in ms (purposefully large)
+    pc.set_maxstep(10)
+
+    pc.barrier()
+    mindelay = pc.allreduce(pc.set_maxstep(10), 2) # flag 2 returns minimum value
+    if rank==0:
+        print("Running simulation on %d MPI proceses"%nhosts)
+        print('Minimum delay (time-step for queue exchange) is %.2f'%(mindelay))
+        def printRunTime():
+            def prsimtime():
+                print('Simulation time: {0} ms...'.format(round(h.t, 2)))
+            for tt in range(int(mindelay), int(h.tstop), int(mindelay)):
+                h.cvode.event(tt, prsimtime)  # print time callbacks
+
+        fih.append(h.FInitializeHandler(1, printRunTime))
+
+    ## global variables, should be node-independent
+    h("dp_total_L2 = 0.")
+    h("dp_total_L5 = 0.")
+
     net = NetworkOnNode(params)  # create node-specific network
 
     # We define the arrays (Vector in numpy) for recording the signals
@@ -53,45 +106,37 @@ def simulate_dipole(params):
 
     net.movecellstopos()  # position cells in 2D grid
 
-    # sets the default max solver step in ms (purposefully large)
-    pc.set_maxstep(10)
-
     # initialize cells to -65 mV, after all the NetCon
     # delays have been specified
     h.finitialize()
 
-    def prsimtime():
-        print('Simulation time: {0} ms...'.format(round(h.t, 2)))
+    # Can only write files for CoreNEURON or run the simulation.
+    # We seg fault if trying to do both
+    if write_coreneuron:
+        coredir = './coreneuron_data/'
 
-    printdt = 10
-    for tt in range(0, int(h.tstop), printdt):
-        h.cvode.event(tt, prsimtime)  # print time callbacks
+        print('\nWiting simulation config to %s...'%coredir)
+        pc.nrnbbcore_write(coredir)
+        print("Finished.")
 
-    h.fcurrent()
-    # set state variables if they have been changed since h.finitialize
-    h.frecord_init()
+        return None
+
+    if rank == 0:
+        print('\nRunning simulation for %s ms...'%h.tstop)
+
     # actual simulation - run the solver
     pc.psolve(h.tstop)
 
-    # these calls aggregate data across procs/nodes
-    pc.allreduce(dp_rec_L2, 1)
-    # combine dp_rec on every node, 1=add contributions together
-    pc.allreduce(dp_rec_L5, 1)
-    # aggregate the currents independently on each proc
-    net.aggregate_currents()
-    # combine net.current{} variables on each proc
-    pc.allreduce(net.current['L5Pyr_soma'], 1)
-    pc.allreduce(net.current['L2Pyr_soma'], 1)
+    if nhosts > 1:  # only gather if >1 nodes
+        if rank==0:
+            print('\nGathering data...')
+        # these calls aggregate data across procs/nodes
+        pc.allreduce(dp_rec_L2, 1)
+        # combine dp_rec on every node, 1=add contributions together
+        pc.allreduce(dp_rec_L5, 1)
 
     dpl_data = np.c_[dp_rec_L2.as_numpy() + dp_rec_L5.as_numpy(),
                      dp_rec_L2.as_numpy(), dp_rec_L5.as_numpy()]
-
-    pc.barrier()  # get all nodes to this place before continuing
-    pc.gid_clear()
-
-    pc.runworker()
-    pc.done()
-
     dpl = Dipole(t_vec.as_numpy(), dpl_data)
     dpl.baseline_renormalize(params)
     dpl.convert_fAm_to_nAm()

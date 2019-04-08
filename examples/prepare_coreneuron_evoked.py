@@ -29,14 +29,14 @@ h.load_file("stdrun.hoc")
 # Then we read the parameters file
 params_fname = op.join(mne_neuron_root, 'param', 'default.json')
 params = Params(params_fname)
-print(params)
+print("Loading %d params from %s"%(len(params),params_fname))
+#print(params)
 
 ###############################################################################
 # This is a lot of parameters! We can also filter the
 # parameters using unix-style wildcard characters
-print(params['L2Pyr_soma*'])
+#print(params['L2Pyr_soma*'])
 
 ###############################################################################
-# Now let's simulate the dipole and plot it
-dpl = simulate_dipole(params, False)
-dpl.plot()
+# Now let's write output for CoreNEURON and simulate the dipole
+dpl = simulate_dipole(params, True)

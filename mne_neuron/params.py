@@ -8,7 +8,12 @@ import fnmatch
 from copy import deepcopy
 
 from .params_default import get_params_default
+from neuron import h
 
+# Declare variables used to share ParallelContext with network.py and cell.py
+pc = h.ParallelContext()
+nhosts = int(pc.nhost())
+rank = int(pc.id())
 
 # return number of evoked inputs (proximal, distal)
 # using dictionary d (or if d is a string, first load the dictionary from

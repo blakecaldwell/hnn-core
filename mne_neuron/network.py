@@ -12,7 +12,7 @@ from .feed import ExtFeed
 from .pyramidal import L2Pyr, L5Pyr
 from .basket import L2Basket, L5Basket
 from .params import create_pext
-
+from .sim import pc, nhosts, rank
 
 class NetworkOnNode(object):
     """The NetworkOnNode class.
@@ -43,9 +43,6 @@ class NetworkOnNode(object):
             'y': self.p['N_pyr_y'],
         }
         # Parallel stuff
-        self.pc = h.ParallelContext()
-        self.n_hosts = int(self.pc.nhost())
-        self.rank = int(self.pc.id())
         self.N_src = 0
         self.N = {}  # numbers of sources
         self.N_cells = 0  # init self.N_cells
@@ -91,15 +88,14 @@ class NetworkOnNode(object):
         # initialize the lists in the dict
         for key in self.ext_list.keys():
             self.ext_list[key] = []
+        # set up to record spikes in _create_all_src()
+        self.spiketimes = h.Vector()
+        self.spikegids = h.Vector()
         # create sources and init
         self._create_all_src()
         self.state_init()
         # parallel network connector
         self.__parnet_connect()
-        # set to record spikes
-        self.spiketimes = h.Vector()
-        self.spikegids = h.Vector()
-        self._record_spikes()
 
     # creates the immutable source list along with corresponding numbers
     # of cells
@@ -213,24 +209,24 @@ class NetworkOnNode(object):
     # creates self.__gid_list for THIS node
     def __gid_assign(self):
         # round robin assignment of gids
-        for gid in range(self.rank, self.N_cells, self.n_hosts):
+        for gid in range(rank, self.N_cells, nhosts):
             # set the cell gid
-            self.pc.set_gid2node(gid, self.rank)
+            pc.set_gid2node(gid, rank)
             self.__gid_list.append(gid)
             # now to do the cell-specific external input gids on the same proc
             # these are guaranteed to exist because all of
             # these inputs were created for each cell
             for key in self.p_unique.keys():
                 gid_input = gid + self.gid_dict[key][0]
-                self.pc.set_gid2node(gid_input, self.rank)
+                pc.set_gid2node(gid_input, rank)
                 self.__gid_list.append(gid_input)
         # legacy handling of the external inputs
         # NOT perfectly balanced for now
-        for gid_base in range(self.rank, self.N_extinput, self.n_hosts):
+        for gid_base in range(rank, self.N_extinput, nhosts):
             # shift the gid_base to the extinput gid
             gid = gid_base + self.gid_dict['extinput'][0]
             # set as usual
-            self.pc.set_gid2node(gid, self.rank)
+            pc.set_gid2node(gid, rank)
             self.__gid_list.append(gid)
         # extremely important to get the gids in the right order
         self.__gid_list.sort()
@@ -249,7 +245,7 @@ class NetworkOnNode(object):
         # loop through gids on this node
         for gid in self.__gid_list:
 
-            if not self.pc.gid_exists(gid):
+            if not pc.gid_exists(gid):
                 raise ValueError('GID does not exist. See Cell()')
 
             # get type of cell and pos via gid
@@ -262,9 +258,9 @@ class NetworkOnNode(object):
             # creates a NetCon object internally to Neuron
             if type == 'L2_pyramidal':
                 self.cells.append(L2Pyr(gid, pos, self.p))
-                self.pc.cell(
-                    gid, self.cells[-1].connect_to_target(
-                        None, self.p['threshold']))
+                nc = self.cells[-1].connect_to_target(None, self.p['threshold'])
+                pc.cell(gid, nc)
+                self._record_spikes(nc, gid)
                 # run the IClamp function here
                 # create_all_IClamp() is defined in L2Pyr (etc)
                 self.cells[-1].create_all_IClamp(self.p)
@@ -272,27 +268,27 @@ class NetworkOnNode(object):
                     self.cells[-1].record_volt_soma()
             elif type == 'L5_pyramidal':
                 self.cells.append(L5Pyr(gid, pos, self.p))
-                self.pc.cell(
-                    gid, self.cells[-1].connect_to_target(
-                        None, self.p['threshold']))
+                nc = self.cells[-1].connect_to_target(None, self.p['threshold'])
+                pc.cell(gid, nc)
+                self._record_spikes(nc, gid)
                 # run the IClamp function here
                 self.cells[-1].create_all_IClamp(self.p)
                 if self.p['save_vsoma']:
                     self.cells[-1].record_volt_soma()
             elif type == 'L2_basket':
                 self.cells.append(L2Basket(gid, pos))
-                self.pc.cell(
-                    gid, self.cells[-1].connect_to_target(
-                        None, self.p['threshold']))
+                nc = self.cells[-1].connect_to_target(None, self.p['threshold'])
+                pc.cell(gid, nc)
+                self._record_spikes(nc, gid)
                 # also run the IClamp for L2_basket
                 self.cells[-1].create_all_IClamp(self.p)
                 if self.p['save_vsoma']:
                     self.cells[-1].record_volt_soma()
             elif type == 'L5_basket':
                 self.cells.append(L5Basket(gid, pos))
-                self.pc.cell(
-                    gid, self.cells[-1].connect_to_target(
-                        None, self.p['threshold']))
+                nc = self.cells[-1].connect_to_target(None, self.p['threshold'])
+                pc.cell(gid, nc)
+                self._record_spikes(nc, gid)
                 # run the IClamp function here
                 self.cells[-1].create_all_IClamp(self.p)
                 if self.p['save_vsoma']:
@@ -306,18 +302,18 @@ class NetworkOnNode(object):
                 # the cell and artificial NetCon
                 self.extinput_list.append(ExtFeed(
                     type, None, self.p_ext[p_ind], gid))
-                self.pc.cell(
-                    gid, self.extinput_list[-1].connect_to_target(
-                        self.p['threshold']))
+                nc = self.extinput_list[-1].connect_to_target(self.p['threshold'])
+                pc.cell(gid, nc)
+                self._record_spikes(nc, gid)
             elif type in self.p_unique.keys():
                 gid_post = gid - self.gid_dict[type][0]
                 cell_type = self.gid_to_type(gid_post)
                 # create dictionary entry, append to list
                 self.ext_list[type].append(ExtFeed(
                     type, cell_type, self.p_unique[type], gid))
-                self.pc.cell(
-                    gid, self.ext_list[type][-1].connect_to_target(
-                        self.p['threshold']))
+                nc = self.ext_list[type][-1].connect_to_target(self.p['threshold'])
+                pc.cell(gid, nc)
+                self._record_spikes(nc, gid)
             else:
                 print("None of these types in Net()")
                 exit()
@@ -333,7 +329,7 @@ class NetworkOnNode(object):
         # cells has NO extinputs anyway. also no extgausses
         for gid, cell in zip(self.__gid_list, self.cells):
             # ignore iteration over inputs, since they are NOT targets
-            if self.pc.gid_exists(gid) and self.gid_to_type(gid) \
+            if pc.gid_exists(gid) and self.gid_to_type(gid) \
                     != 'extinput':
                 # for each gid, find all the other cells connected to it,
                 # based on gid
@@ -350,14 +346,8 @@ class NetworkOnNode(object):
                     cell.parreceive_ext(
                         type, gid, self.gid_dict, self.pos_dict, p_type)
 
-    # setup spike recording for this node
-    def _record_spikes(self):
-        # iterate through gids on this node and
-        # set to record spikes in spike time vec and id vec
-        # agnostic to type of source, will sort that out later
-        for gid in self.__gid_list:
-            if self.pc.gid_exists(gid):
-                self.pc.spike_record(gid, self.spiketimes, self.spikegids)
+    def _record_spikes(self, nc, gid):
+        nc.record(self.spiketimes, self.spikegids, gid)
 
     def get_vsoma(self):
         dsoma = {}

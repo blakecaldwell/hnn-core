@@ -23,8 +23,8 @@ NEURON {
     USEION ca READ cai
     RANGE n, gk, gbar
     RANGE ninf, ntau
-    GLOBAL Ra, Rb, caix
-    GLOBAL q10, temp, tadj, vmin, vmax, tshift
+    RANGE Ra, Rb, caix
+    RANGE q10, temp, tadj, vmin, vmax, tshift
 }
 
 UNITS {

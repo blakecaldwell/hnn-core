@@ -6,9 +6,7 @@
 import numpy as np
 from neuron import h
 
-# global variables, should be node-independent
-h("dp_total_L2 = 0.")
-h("dp_total_L5 = 0.")  # put here since these variables used in cells
+from .sim import pc
 
 # Units for e: mV
 # Units for gbar: S/cm^2
@@ -28,7 +26,6 @@ class _Cell(object):
 
     def __init__(self, gid, soma_props):
         self.gid = gid
-        self.pc = h.ParallelContext()  # Parallel methods
         # make L_soma and diam_soma elements of self
         # Used in shape_change() b/c func clobbers self.soma.L, self.soma.diam
         self.L = soma_props['L']
@@ -299,7 +296,7 @@ class _Cell(object):
         nc : instance of h.NetCon
             A network connection object.
         """
-        nc = self.pc.gid_connect(gid_presyn, postsyn)
+        nc = pc.gid_connect(gid_presyn, postsyn)
         # calculate distance between cell positions with pardistance()
         d = self.__pardistance(nc_dict['pos_src'])
         # set props here

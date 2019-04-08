@@ -47,8 +47,8 @@ NEURON {
 
     : SRJones put taur up here
     RANGE ca, taur
-    GLOBAL depth, cainf
-    : GLOBAL depth, cainf, taur
+    RANGE depth, cainf
+    : RANGE depth, cainf, taur
 }
 
 UNITS {

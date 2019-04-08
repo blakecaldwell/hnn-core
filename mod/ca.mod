@@ -21,7 +21,7 @@ NEURON {
     USEION ca READ eca WRITE ica
     RANGE m, h, gca, gbar
     RANGE minf, hinf, mtau, htau
-    GLOBAL q10, temp, tadj, vmin, vmax, vshift, tshift
+    RANGE q10, temp, tadj, vmin, vmax, vshift, tshift
 }
 
 PARAMETER {
