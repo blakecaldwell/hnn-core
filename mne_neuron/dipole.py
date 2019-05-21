@@ -114,6 +114,150 @@ def simulate_dipole(net):
     return dpl
 
 
+def rmse (a1, a2):
+    from numpy import sqrt
+
+    # return root mean squared error between a1, a2; assumes same lengths, sampling rates
+    len1,len2 = len(a1),len(a2)
+    sz = min(len1,len2)
+    return sqrt(((a1[0:sz] - a2[0:sz]) ** 2).mean())
+
+
+def calcerr (ddat):
+    from scipy import signal
+
+    # calculates RMSE error from ddat
+    # first downsample simulation timeseries to 600 Hz (assumes same time length as data)
+    dpldown = signal.resample(ddat['dpl']['agg'], len(ddat['dextdata']))
+    err0 = rmse(ddat['dextdata'][:,1], dpldown)
+    return err0
+
+
+def calculate_dipole_err(net, extdata=None):
+
+    """Simulate a dipole given the experiment parameters.
+
+    Parameters
+    ----------
+    net : Network object
+        The Network object specifying how cells are
+        connected.
+    extdata : np.Array | None
+        Array with preloaded data to compare simulation
+        results against
+
+    Returns
+    -------
+    dpl: instance of Dipole
+        The dipole object
+    err: float
+        RMSE of comparison against data in fn or
+        extdata
+    """
+    from .parallel import rank, nhosts, pc, cvode
+    from .network import Network
+
+    from neuron import h
+    h.load_file("stdrun.hoc")
+
+    import time
+
+    # Now let's simulate the dipole
+    if rank == 0:
+        print("running on %d cores" % nhosts)
+
+    # global variables, should be node-independent
+    h("dp_total_L2 = 0.")
+    h("dp_total_L5 = 0.")
+
+    # Set tstop before instantiating any classes
+    h.tstop = net.params['tstop']
+    h.dt = net.params['dt']  # simulation duration and time-step
+    h.celsius = net.params['celsius']  # 37.0 - set temperature
+
+    # We define the arrays (Vector in numpy) for recording the signals
+    t_vec = h.Vector()
+    t_vec.record(h._ref_t)  # time recording
+    dp_rec_L2 = h.Vector()
+    dp_rec_L2.record(h._ref_dp_total_L2)  # L2 dipole recording
+    dp_rec_L5 = h.Vector()
+    dp_rec_L5.record(h._ref_dp_total_L5)  # L5 dipole recording
+
+    net.movecellstopos()  # position cells in 2D grid
+
+    t0 = time.time() # clock start time
+
+    # sets the default max solver step in ms (purposefully large)
+    pc.set_maxstep(10)
+
+    # initialize cells to -65 mV, after all the NetCon
+    # delays have been specified
+    h.finitialize()
+
+    def prsimtime():
+        print('Simulation time: {0} ms...'.format(round(h.t, 2)))
+
+    printdt = 10
+    if rank == 0:
+        for tt in range(0, int(h.tstop), printdt):
+            cvode.event(tt, prsimtime)  # print time callbacks
+
+    h.fcurrent()
+    # set state variables if they have been changed since h.finitialize
+    h.frecord_init()
+    # actual simulation - run the solver
+    pc.psolve(h.tstop)
+
+    pc.barrier()
+
+    # these calls aggregate data across procs/nodes
+    pc.allreduce(dp_rec_L2, 1)
+    # combine dp_rec on every node, 1=add contributions together
+    pc.allreduce(dp_rec_L5, 1)
+    # aggregate the currents independently on each proc
+    net.aggregate_currents()
+    # combine net.current{} variables on each proc
+    pc.allreduce(net.current['L5Pyr_soma'], 1)
+    pc.allreduce(net.current['L2Pyr_soma'], 1)
+
+    pc.barrier()  # get all nodes to this place before continuing
+
+    dpl_data = np.c_[np.array(dp_rec_L2.to_python()) +
+                     np.array(dp_rec_L5.to_python()),
+                     np.array(dp_rec_L2.to_python()),
+                     np.array(dp_rec_L5.to_python())]
+
+    if rank == 0:
+        print("Simulation run time: %4.4f s" % (time.time()-t0))
+
+    pc.gid_clear()
+    pc.done()
+
+    dpl = Dipole(np.array(t_vec.to_python()), dpl_data)
+
+    err = 0
+    if rank == 0:
+        if net.params['save_dpl']:
+            dpl.write('rawdpl.txt')
+
+        dpl.baseline_renormalize(net.params)
+        dpl.convert_fAm_to_nAm()
+        dpl.scale(net.params['dipole_scalefctr'])
+        dpl.smooth(net.params['dipole_smooth_win'] / h.dt)
+        try:
+            if extdata.any():
+                ddat = {}
+                ddat['dpl'] = dpl.dpl
+                ddat['dextdata'] = extdata
+                err = calcerr(ddat)
+                print("RMSE:", err)
+        except AttributeError:
+            # extdata is not an array
+            err = None
+
+    return dpl, err
+
+
 class Dipole(object):
     """Dipole class.
 
