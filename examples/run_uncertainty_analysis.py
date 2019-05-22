@@ -40,6 +40,30 @@ params_fname = op.join(mne_neuron_root, 'param', 'default.json')
 extdata = loadtxt('yes_trial_S1_ERP_all_avg.txt')
 
 ###############################################################################
+# Prepare class to get monotonically increasing unique ID
+
+
+import threading
+
+# counter from https://gist.github.com/benhoyt/8c8a8d62debe8e5aa5340373f9c509c7
+class AtomicCounter:
+    """An atomic, thread-safe incrementing counter."""
+    def __init__(self, initial=0):
+        """Initialize a new atomic counter to given initial value (default 0)."""
+        self.value = initial
+        self._lock = threading.Lock()
+
+    def increment(self, num=1):
+        """Atomically increment the counter by num (default 1) and return the
+        new value.
+        """
+        with self._lock:
+            self.value += num
+            return self.value
+
+counter = AtomicCounter()
+
+###############################################################################
 # Now let's run the analysis
 
 from mpi4py import MPI
@@ -48,12 +72,14 @@ def simulate_dipole(**kwargs):
     # Start clock
     start = MPI.Wtime()
 
+    # get unique_id
+    uid = counter.increment()
+
     params = Params(params_fname)
     for key, value in kwargs.items():
         params[key] = value
 
-    # how many trials to average
-    n_trials = 1
+    params['unique_id'] = uid
 
     # number of processes to run nrniv with
     n_procs = 1
@@ -62,7 +88,7 @@ def simulate_dipole(**kwargs):
     # to allow NEURON parallelization (inner)
     comm = MPI.COMM_SELF.Spawn('nrniv',
                        args=['nrniv', '-python', '-mpi', '-nobanner', 'python',
-                             'examples/calculate_dipole_err.py', str(n_trials)],
+                             'examples/calculate_dipole_err.py'],
                        maxprocs=n_procs)
 
     # send params to spawned nrniv procs
@@ -82,7 +108,7 @@ def simulate_dipole(**kwargs):
     # this seems to break the analysis
     #comm.Disconnect()
     finish = MPI.Wtime() - start
-    print('\nProcessed in %.2f secs' % finish)
+    print('Processed in %.2f secs' % finish)
 
     times = linspace(0, params['tstop'], len(dpl.dpl['agg']))
     info = {"rmse_output" : err}

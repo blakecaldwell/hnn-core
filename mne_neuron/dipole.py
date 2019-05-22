@@ -115,7 +115,9 @@ def simulate_dipole(net, trial=0, inc_evinput=0.0, print_progress=True, extdata=
     # Now let's simulate the dipole
 
     pc.barrier() # sync for output to screen
-    if rank == 0:
+    if print_progress and rank == 0:
+        import time
+        t0 = time.time() # clock start time
         print("Running trial %d (on %d cores)" % (trial+1, nhosts))
 
     # initialize cells to -65 mV, after all the NetCon
@@ -150,6 +152,8 @@ def simulate_dipole(net, trial=0, inc_evinput=0.0, print_progress=True, extdata=
     pc.allreduce(net.current['L2Pyr_soma'], 1)
 
     pc.barrier()  # get all nodes to this place before continuing
+    if print_progress and rank == 0:
+        print("Simulation run time: %4.4f s" % (time.time()-t0))
 
     dpl_data = np.c_[np.array(dp_rec_L2.to_python()) +
                      np.array(dp_rec_L5.to_python()),
@@ -173,7 +177,8 @@ def simulate_dipole(net, trial=0, inc_evinput=0.0, print_progress=True, extdata=
             if extdata.any():
                 ddat = {'dpl' : dpl.dpl, 'dextdata' : extdata}
                 err = calcerr(ddat)
-                print("RMSE:", err)
+                if print_progress:
+                    print("RMSE:", err)
         except AttributeError:
             # extdata is not an array
             pass
