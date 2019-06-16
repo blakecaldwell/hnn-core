@@ -101,8 +101,7 @@ if get_rank() == 0:
                             'params_%d.json' % int(net.params['unique_id']))
         with open(out_fname, 'w') as json_out:
             dump(net.params, json_out, indent=4)
-
-    except MPI.Exception:
-        raise
+    except NameError:
+        pass
 
 shutdown()
