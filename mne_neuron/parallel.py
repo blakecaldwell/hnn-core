@@ -39,6 +39,12 @@ def create_parallel_context(n_jobs=None):
     rank = int(pc.id())     # rank or node number (0 will be the master)
     cvode = h.CVode()
 
+    # be explicit about using fixed step integration
+    cvode.active(0)
+
+    # use cache_efficient mode for allocating elements in contiguous order
+    cvode.cache_efficient(1)
+
     if rank == 0:
         pc.gid_clear()
 
