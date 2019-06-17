@@ -12,7 +12,7 @@ from tqdm import tqdm
 import numpy as np
 
 try:
-    from xvfbwrapper import Xvfb
+#    from xvfbwrapper import Xvfb
 
     prerequisites = True
 except ImportError:
@@ -417,8 +417,8 @@ class RunModel(ParameterBase):
             if not prerequisites:
                 raise ImportError("Running with suppress_graphics require: xvfbwrapper")
 
-            vdisplay = Xvfb()
-            vdisplay.start()
+#            vdisplay = Xvfb()
+#            vdisplay.start()
 
         results = []
 
@@ -449,8 +449,8 @@ class RunModel(ParameterBase):
 
 
 
-        if self.model.suppress_graphics:
-            vdisplay.stop()
+        #if self.model.suppress_graphics:
+        #    vdisplay.stop()
 
         return results
 
