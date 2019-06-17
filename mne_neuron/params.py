@@ -34,6 +34,8 @@ class Params(dict):
     """
 
     def __init__(self, params_fname):
+        import os.path as op
+
         with open(params_fname) as json_data:
             params_input = json.load(json_data)
 
@@ -46,6 +48,9 @@ class Params(dict):
             if key in params_input:
                 params[key] = params_input.pop(key)
             self[key] = params[key]
+
+        if not 'sim_prefix' in self.keys():
+            self['sim_prefix'] = op.basename(params_fname)
 
     def __repr__(self):
         """Display the params nicely."""
@@ -81,6 +86,29 @@ class Params(dict):
 
     def copy(self):
         return deepcopy(self)
+
+
+    def write(self, unique=False):
+        """Write the contents of params dictionary to a JSON file"""
+
+        from os import makedirs, path
+        from hashlib import blake2b
+
+        if unique:
+            m = blake2b(digest_size=8)
+            for k, v in sorted(self.items()):
+                m.update(str(v).encode('utf-8'))
+
+            unique_id = m.hexdigest()
+            fname = path.join('data', self['sim_prefix'],
+                                'params_%s.json' % unique_id)
+        else:
+            fname = path.join('data', self['sim_prefix'],
+                                'params.json')
+        makedirs(path.dirname(fname), exist_ok=True)
+
+        with open(fname, 'w') as json_out:
+            json.dump(self, json_out, indent=4)
 
 
 def feed_validate(p_ext, d, tstop):
