@@ -14,6 +14,7 @@ and a simulated waveform using MNE-Neuron.
 
 from numpy import loadtxt, mean
 import os.path as op
+from os import environ
 
 ###############################################################################
 # Let us import mne_neuron
@@ -28,6 +29,7 @@ mne_neuron_root = op.join(op.dirname(mne_neuron.__file__), '..')
 # Try to read the parameters and exp data via MPI
 
 from mpi4py import MPI
+
 
 try:
     comm = MPI.Comm.Get_parent()
@@ -93,8 +95,8 @@ try:
     comm.Barrier()
     comm.Disconnect()
 
-except NameError:
-    # don't fail if this script was called without MP`
+except MPI.Exception or NameError:
+    # don't fail if this script was called without MPI
     pass
 
 shutdown()

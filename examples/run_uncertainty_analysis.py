@@ -147,20 +147,33 @@ def simulate_dipole_mpi(**kwargs):
     extdata = loadtxt('yes_trial_S1_ERP_all_avg.txt')
 
     # number of processes to run nrniv with
-    n_procs = 8
+    if 'SLURM_CPUS_ON_NODE' in environ:
+#        n_procs = int(environ['SLURM_CPUS_ON_NODE'])
+        n_procs = 1
+    else:
+        n_procs = 1
 
     # limit MPI to this host only
     mpiinfo = MPI.Info().Create()
-    if 'HOSTNAME' in environ:
-        mpiinfo.Set('host', environ['HOSTNAME'])
-        mpiinfo.Set('bind-to', 'none')
-        mpiinfo.Set('ompi_param', 'rmaps_base_maps_inherit=0')
+#    if 'SLURMD_NODENAME' in environ:
+#        mpiinfo.Set('host', environ['SLURMD_NODENAME'])
+#    mpiinfo.Set('npernode', str(n_procs))
+#    mpiinfo.Set('rank_by', 'slot')
+#    mpiinfo.Set('ompi_param', 'rmaps_base_maps_inherit=0')
+#    mpiinfo.Set('ompi_param', 'rmaps_base_schedule_local=0')
 
     # spawn NEURON sim
-    comm = MPI.COMM_SELF.Spawn('nrniv',
-            args=['nrniv', '-python', '-mpi', '-nobanner', 'python',
-                  'examples/calculate_dipole_err.py'],
-            info = mpiinfo, maxprocs=n_procs)
+    while True:
+        try:
+            comm = MPI.COMM_SELF.Spawn('nrniv',
+                    args=['nrniv', '-python', '-mpi', '-nobanner', 'python',
+                          'examples/calculate_dipole_err.py'],
+                    info = mpiinfo, maxprocs=n_procs)
+            break
+        except MPI.Exception:
+            # try again to see if a slot has opened up
+            sleep(1)
+            continue
 
     # send params and extdata to spawned nrniv procs
     simdata = (params, extdata)
@@ -181,32 +194,7 @@ def simulate_dipole_mpi(**kwargs):
     finish = MPI.Wtime() - start
     print('Simulation in %.2f secs' % finish)
 
-    # sleep to make sure all nrniv processes have finished
-    while (nrniv_children_running()):
-        print("sleeping 1s")
-        sleep(1)
-
-    return times, avg_dpl, info
-
-
-def nrniv_children_running():
-    import psutil
-
-    def find_procs_by_name(name):
-        "Return a list of processes matching 'name'."
-        ls = []
-        for p in psutil.process_iter(attrs=["name", "exe", "cmdline"]):
-            if name == p.info['name'] or \
-                    p.info['exe'] and op.basename(p.info['exe']) == name or \
-                    p.info['cmdline'] and p.info['cmdline'][0] == name:
-                ls.append(p)
-        return ls
-
-    procs = find_procs_by_name('nrniv')
-    if len(procs) > 0:
-        return True
-
-    return False
+    return times, avg_dpl.dpl['agg'], info
 
 
 # define the model to analyze
@@ -245,10 +233,10 @@ gbar_evprox_2_L5Basket_ampa_dist = cp.Uniform(0.0079,0.0279)
 parameters = {
     "sigma_t_evprox_1": sigma_t_evprox_1_dist,
     "t_evprox_1": t_evprox_1_dist,
-#    "gbar_evprox_1_L2Pyr_ampa": gbar_evprox_1_L2Pyr_ampa_dist,
-#    "gbar_evprox_1_L2Pyr_nmda": gbar_evprox_1_L2Pyr_nmda_dist,
-#    "gbar_evprox_1_L5Pyr_ampa": gbar_evprox_1_L5Pyr_ampa_dist,
-#    "gbar_evprox_1_L5Pyr_nmda": gbar_evprox_1_L5Pyr_nmda_dist,
+    "gbar_evprox_1_L2Pyr_ampa": gbar_evprox_1_L2Pyr_ampa_dist,
+    "gbar_evprox_1_L2Pyr_nmda": gbar_evprox_1_L2Pyr_nmda_dist,
+    "gbar_evprox_1_L5Pyr_ampa": gbar_evprox_1_L5Pyr_ampa_dist,
+    "gbar_evprox_1_L5Pyr_nmda": gbar_evprox_1_L5Pyr_nmda_dist,
 #    "gbar_evprox_1_L2Basket_ampa": gbar_evprox_1_L2Basket_ampa_dist,
 #    "gbar_evprox_1_L2Basket_nmda": gbar_evprox_1_L2Basket_nmda_dist,
 #    "gbar_evprox_1_L5Basket_ampa": gbar_evprox_1_L5Basket_ampa_dist,
@@ -271,8 +259,9 @@ parameters = {
 
 feature_list = [rmse_output]
 
-if 'SLURM_JOB_NUM_NODES' in environ.keys():
-    n_nodes = int(environ['SLURM_JOB_NUM_NODES']) - 1
+if 'SLURM_NNODES' in environ:
+    n_nodes = max(1,int(environ['SLURM_NNODES']) *
+                    int(environ['SLURM_CPUS_ON_NODE']) - 1)
 else:
     n_nodes = 1
 
@@ -291,6 +280,6 @@ def run_uncertainpy():
 
 
 if __name__ == '__main__':
-    #import multiprocessing as mp
-    #mp.set_start_method('spawn')
+#    import multiprocessing as mp
+#    mp.set_start_method('spawn')
     run_uncertainpy()
