@@ -1506,7 +1506,6 @@ class UncertaintyCalculations(ParameterBase):
 
         nodes = distribution.inv(dist_R.fwd(nodes_R.transpose()))
 
-
         data = self.runmodel.run(nodes, uncertain_parameters)
 
         data.method = "monte carlo method. nr_samples={}".format(nr_samples)

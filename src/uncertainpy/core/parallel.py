@@ -228,7 +228,7 @@ class Parallel(Base):
 
 
 
-    def run(self, model_parameters):
+    def run(self, model_result):
         """
         Run a model and calculate features from the model output,
         return the results.
@@ -293,7 +293,7 @@ class Parallel(Base):
             # model_result = self.model.run(**model_parameters, **self.model.model_kwargs)
             # self.model.validate_run(model_result)
 
-            model_result = self.model.evaluate(**model_parameters)
+            #model_result = self.model.evaluate(**model_parameters)
 
             results = {}
 

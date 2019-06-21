@@ -91,10 +91,10 @@ class RunModel(ParameterBase):
                  logger_level="info",
                  CPUs="max"):
 
-        if CPUs == "max":
-            import multiprocess
-
-            CPUs = multiprocess.cpu_count()
+#        if CPUs == "max":
+#            import multiprocess
+#
+#            CPUs = multiprocess.cpu_count()
 
 
         self._parallel = Parallel(model=model,
@@ -425,20 +425,57 @@ class RunModel(ParameterBase):
         model_parameters = self.create_model_parameters(nodes, uncertain_parameters)
 
         if self.CPUs:
-            import multiprocess as mp
+            from mpi4py import MPI
+            from numpy import linspace
 
-            pool = mp.Pool(processes=self.CPUs)
+            def enum(*sequential, **named):
+                """Handy way to fake an enumerated type in Python
+                http://stackoverflow.com/questions/36932/how-can-i-represent-an-enum-in-python
+                """
+                enums = dict(zip(sequential, range(len(sequential))), **named)
+                return type('Enum', (), enums)
 
-            # pool.map(self._parallel.run, model_parameters)
-            # chunksize = int(np.ceil(len(model_parameters)/self.CPUs))
-            chunksize = 1
-            for result in tqdm(pool.imap(self._parallel.run, model_parameters, chunksize),
-                               desc="Running model",
-                               total=len(nodes.T)):
+            # Define MPI message tags
+            tags = enum('READY', 'DONE', 'EXIT', 'START')
 
-                results.append(result)
+            # Initializations and preliminaries
+            comm = MPI.COMM_WORLD   # get MPI communicator object
+            rank = comm.rank        # rank of this process
+            status = MPI.Status()   # get MPI status object
 
-            pool.close()
+            num_workers = self.CPUs
+            closed_workers = 0
+            task_index = 0
+
+            print("Master starting %d tasks over %d workers" % (len(nodes.T), num_workers))
+
+            while closed_workers < num_workers:
+                data = comm.recv(source=MPI.ANY_SOURCE, tag=MPI.ANY_TAG, status=status)
+                source = status.Get_source()
+                tag = status.Get_tag()
+
+                if tag == tags.READY:
+                    # Worker is ready, so send it a task
+                    if task_index < len(nodes.T):
+                        comm.isend(model_parameters[task_index], dest=source, tag=tags.START)
+                        print("Sending task %d to worker %d" % (task_index, source))
+                        task_index += 1
+                    else:
+                        comm.isend(None, dest=source, tag=tags.EXIT)
+                elif tag == tags.DONE:
+                    #print("Got data from worker %d" % source)
+                    agg_dpl = data[0]
+                    sim_params = data[1]
+                    #(agg_dpl, sim_params) = data
+
+                    # put results in form that uncertainpy expects
+                    info = {"rmse_output" : sim_params[0]}
+                    times = linspace(0, sim_params[1], len(agg_dpl))
+                    result = self._parallel.run((times, agg_dpl, info))
+                    results.append(result)
+                elif tag == tags.EXIT:
+                    print("Worker %d exited (%d running)" % (source, closed_workers))
+                    closed_workers += 1
 
         else:
             for result in tqdm(imap(self._parallel.run, model_parameters),
