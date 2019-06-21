@@ -56,25 +56,24 @@ def initialize_sim(net):
     from neuron import h
     h.load_file("stdrun.hoc")
 
-    # create or reinitialize scalars in NEURON (hoc) context
-    h("dp_total_L2 = 0.")
-    h("dp_total_L5 = 0.")
-
-    # Connect NEURON scalar references to python vectors
-    # TODO: initialize with Vector(size) to avoid dynamic resizing
-    t_vec = h.Vector().record(h._ref_t)  # time recording
-    dp_rec_L2 = h.Vector().record(h._ref_dp_total_L2)  # L2 dipole recording
-    dp_rec_L5 = h.Vector().record(h._ref_dp_total_L5)  # L5 dipole recording
-
     # Set tstop before instantiating any classes
     h.tstop = net.params['tstop']
     h.dt = net.params['dt']  # simulation duration and time-step
     h.celsius = net.params['celsius']  # 37.0 - set temperature
 
+    # create or reinitialize scalars in NEURON (hoc) context
+    h("dp_total_L2 = 0.")
+    h("dp_total_L5 = 0.")
+
+    # Connect NEURON scalar references to python vectors
+    t_vec = h.Vector(int(h.tstop / h.dt + 1)).record(h._ref_t)  # time recording
+    dp_rec_L2 = h.Vector(int(h.tstop / h.dt + 1)).record(h._ref_dp_total_L2)  # L2 dipole recording
+    dp_rec_L5 = h.Vector(int(h.tstop / h.dt + 1)).record(h._ref_dp_total_L5)  # L5 dipole recording
+
     return t_vec, dp_rec_L2, dp_rec_L5
 
 
-def simulate_dipole(net, trial=0, inc_evinput=0.0, verbose=True, extdata=None):
+def simulate_dipole(net, trial=0, verbose=True, extdata=None):
     """Simulate a dipole given the experiment parameters.
 
     Parameters
@@ -84,10 +83,6 @@ def simulate_dipole(net, trial=0, inc_evinput=0.0, verbose=True, extdata=None):
         connected.
     trial : int
         Current trial number
-    evinputinc : float
-        An increment (in milliseconds) that gets added
-        to the evoked inputs on each successive trial.
-        The default value is 0.0.
     verbose: bool
         False will turn off "Simulation time" messages
     extdata : np.Array | None
@@ -117,8 +112,8 @@ def simulate_dipole(net, trial=0, inc_evinput=0.0, verbose=True, extdata=None):
 
     # Now let's simulate the dipole
 
-    pc.barrier()  # sync for output to screen
-    if rank == 0:
+    if verbose and rank == 0:
+        pc.barrier()  # sync for output to screen
         print("Running trial %d (on %d cores)" % (trial + 1, nhosts))
 
     # initialize cells to -65 mV, after all the NetCon
@@ -135,12 +130,12 @@ def simulate_dipole(net, trial=0, inc_evinput=0.0, verbose=True, extdata=None):
 
     h.fcurrent()
 
-    pc.barrier()  # get all nodes to this place before continuing
+    #pc.barrier()  # get all nodes to this place before continuing
 
     # actual simulation - run the solver
     pc.psolve(h.tstop)
 
-    pc.barrier()
+    #pc.barrier()
 
     # these calls aggregate data across procs/nodes
     pc.allreduce(dp_rec_L2, 1)
@@ -152,7 +147,7 @@ def simulate_dipole(net, trial=0, inc_evinput=0.0, verbose=True, extdata=None):
     pc.allreduce(net.current['L5Pyr_soma'], 1)
     pc.allreduce(net.current['L2Pyr_soma'], 1)
 
-    pc.barrier()  # get all nodes to this place before continuing
+    #pc.barrier()  # get all nodes to this place before continuing
 
     dpl_data = np.c_[np.array(dp_rec_L2.to_python()) +
                      np.array(dp_rec_L5.to_python()),
@@ -161,7 +156,7 @@ def simulate_dipole(net, trial=0, inc_evinput=0.0, verbose=True, extdata=None):
 
     dpl = Dipole(np.array(t_vec.to_python()), dpl_data)
 
-    err = None
+    err = 0
     if rank == 0:
         if net.params['save_dpl']:
             dpl.write('rawdpl_%d.txt' % trial)
@@ -175,7 +170,8 @@ def simulate_dipole(net, trial=0, inc_evinput=0.0, verbose=True, extdata=None):
             if extdata.any():
                 ddat = {'dpl': dpl.dpl, 'dextdata': extdata}
                 err = calcerr(ddat)
-                print("RMSE:", err)
+                if verbose:
+                    print("RMSE:", err)
         except AttributeError:
             # extdata is not an array
             pass

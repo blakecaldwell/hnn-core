@@ -33,11 +33,15 @@ class Params(dict):
         The parameters json file
     """
 
-    def __init__(self, params_fname):
-        import os.path as op
+    def __init__(self, params_fname=None):
+        if params_fname:
+            with open(params_fname) as json_data:
+                params_input = json.load(json_data)
 
-        with open(params_fname) as json_data:
-            params_input = json.load(json_data)
+            self.__from_obj__(params_input)
+
+    def __from_obj__(self, params_input):
+        import os.path as op
 
         nprox, ndist = _count_evoked_inputs(params_input)
 
@@ -83,6 +87,10 @@ class Params(dict):
             for key in keys:
                 if key in matches:
                     self.update({key: value})
+
+    def from_obj(self, json_obj):
+        self.__from_obj__(json_obj)
+        return self
 
     def copy(self):
         return deepcopy(self)

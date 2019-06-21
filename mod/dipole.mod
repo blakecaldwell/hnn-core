@@ -5,6 +5,7 @@
 : last rev: (SL: Added back Qtotal, which WAS used in par version)
 
 NEURON {
+    THREADSAFE
     SUFFIX dipole
     RANGE ri, ia, Q, ztan
     POINTER pv

@@ -17,6 +17,7 @@ ENDCOMMENT
 INDEPENDENT {t FROM 0 TO 1 WITH 1 (ms)}
 
 NEURON {
+THREADSAFE
     SUFFIX km
     USEION k READ ek WRITE ik
     RANGE n, gk, gbar
@@ -88,7 +89,7 @@ INITIAL {
 
 BREAKPOINT {
     SOLVE states METHOD cnexp
-    gk = tadj * gbar * n
+    PROTECT gk = tadj * gbar * n
     ik = (1e-4) * gk * (v - ek)
 }
 
@@ -120,7 +121,10 @@ PROCEDURE rates(v) {
     a = Ra * (v - tha) / (1 - exp(-(v - tha) / qa))
     b = -Rb * (v - tha) / (1 - exp((v - tha) / qa))
 
+    MUTEXLOCK
     tadj = q10^((celsius - temp - tshift) / 10)
     ntau = 1/tadj/(a+b)
+    MUTEXUNLOCK
+
     ninf = a/(a+b)
 }

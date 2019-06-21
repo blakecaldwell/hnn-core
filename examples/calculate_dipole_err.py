@@ -29,74 +29,73 @@ mne_neuron_root = op.join(op.dirname(mne_neuron.__file__), '..')
 # Try to read the parameters and exp data via MPI
 
 from mpi4py import MPI
+import numpy as np
 
+comm = MPI.Comm.Get_parent()
+rank = comm.Get_rank()
 
-try:
-    comm = MPI.Comm.Get_parent()
+# receive extdata and params
+(extdata, base_params_input) = comm.bcast(rank, root=0)
+base_params = Params().from_obj(base_params_input)
 
-    # receive params and extdata
-    (params, extdata) = comm.bcast(comm.Get_rank(), root=0)
+# if run by MPI, suppress output
+verbose = False
 
-    # if run by MPI, suppress output
-    verbose = False
+sim_params = {}
+while True:
+    # receive params
+    new_params = comm.bcast(rank, root=0)
 
-###############################################################################
-# Otherwise read the params and exp file from disk
+    # to make sure we don't have stale params, use the line below
+    #params = base_params.copy()
+    # note: this not possible with a sweep over the same params
+    params = base_params
 
-except MPI.Exception:
+    # set new params
+    for key, value in new_params.items():
+        params[key] = value
 
-    # Have to read the parameters from a file
-    params_fname = op.join(mne_neuron_root, 'param', 'default.json')
-    print("Reading parameters from file:", params_fname)
-    params = Params(params_fname)
+    ###############################################################################
+    # Build our Network and set up parallel simulation
 
-    extdata = loadtxt('yes_trial_S1_ERP_all_avg.txt')
+    net = Network(params)
 
-    verbose = True
+    ###############################################################################
+    # Get number of trials
 
-###############################################################################
-# Build our Network and set up parallel simulation
+    try:
+        ntrials = net.params['N_trials']
+    except KeyError:
+        ntrials = 1
 
-net = Network(params)
+    if verbose and get_rank() == 0:
+        print("Running %d trials" % ntrials)
 
-###############################################################################
-# Get number of trials
+    ###############################################################################
+    # Now let's simulate the dipole
 
-try:
-    ntrials = net.params['N_trials']
-except KeyError:
-    ntrials = 1
+    dpls = [None]*ntrials
+    errs = np.zeros(ntrials)
+    for trial in range(ntrials):
+        dpls[trial], errs[trial] = simulate_dipole(net, trial=trial,
+                                                   verbose=False, extdata=extdata)
 
-###############################################################################
-# Now let's simulate the dipole
-
-if get_rank() == 0 and verbose:
-    print("Running %d trials" % ntrials)
-
-dpls = []
-errs = []
-for trial in range(ntrials):
-    dpl, err = simulate_dipole(net, trial=trial,
-                               inc_evinput=net.params['inc_evinput'],
-                               verbose=False, extdata=extdata)
-    dpls.append(dpl)
-    errs.append(err)
-
-if get_rank() == 0:
-    avg_rmse = mean(errs)
-    if verbose:
-       print("Avg. RMSE:", avg_rmse)
-
-try:
     if get_rank() == 0:
+        params['avg_RMSE'] =  mean(errs)
         # send results back to parent
-        comm.send((average_dipoles(dpls), avg_rmse), dest=0)
+        data = np.array([np.array(average_dipoles(dpls).dpl['agg']).T,
+                        [params['avg_RMSE'], params['tstop']]])
+        comm.send(data, dest=0)
 
-    comm.Barrier()
-    comm.Disconnect()
+        # write params to file with RMSE
+        params.write(unique=True)
 
-except MPI.Exception or NameError:
-    # don't fail if this script was called without MPI
-    pass
+        if verbose:
+           print("Avg. RMSE:", params['avg_RMSE'])
+
+    # reset the network
+    net.gid_clear()
+    del net
 
 shutdown()
+

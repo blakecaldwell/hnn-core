@@ -23,23 +23,11 @@ from json import dump
 from os import environ
 import os.path as op
 
-###############################################################################
-# Let us import mne_neuron
-
-import mne_neuron
-from mne_neuron import Params
-
-mne_neuron_root = op.join(op.dirname(mne_neuron.__file__), '..')
-
-###############################################################################
-# Then we read the parameters file
-params_fname = op.join(mne_neuron_root, 'param', 'ERPYesSupra-3trial.json')
-
-
-###############################################################################
-# Read the dipole data file to compare against
-
-extdata = loadtxt('S1_SupraT.txt')
+from neuron import h
+pc = h.ParallelContext()
+pc.subworlds(1)
+global_nhosts = int(pc.nhost_world())  # Find number of hosts
+global_rank = int(pc.id_world())     # rank or node number (0 will be the master)
 
 ###############################################################################
 # Prepare class to get monotonically increasing unique ID
@@ -279,7 +267,23 @@ def run_uncertainpy():
     UQ.quantify(method="pc", seed=10, plot="all")
 
 
-if __name__ == '__main__':
-#    import multiprocessing as mp
-#    mp.set_start_method('spawn')
+if global_rank == 0:
+    ###############################################################################
+    # Let us import mne_neuron
+    
+    import mne_neuron
+    from mne_neuron import Params
+    
+    mne_neuron_root = op.join(op.dirname(mne_neuron.__file__), '..')
+    
+    ###############################################################################
+    # Then we read the parameters file
+    params_fname = op.join(mne_neuron_root, 'param', 'ERPYesSupra-3trial.json')
+    
+    
+    ###############################################################################
+    # Read the dipole data file to compare against
+    
+    extdata = loadtxt('S1_SupraT.txt')
+
     run_uncertainpy()

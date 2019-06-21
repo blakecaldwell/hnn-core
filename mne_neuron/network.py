@@ -507,7 +507,23 @@ class Network(object):
 
     def gid_clear(self):
         """Clear up NEURON internal gid information"""
-        from .parallel import pc, rank
+        from .parallel import pc
 
-        if rank == 0:
-            pc.gid_clear()
+        # dereference cell and NetConn objects
+        #for gid, cell in zip(self._gid_list, self.cells):
+        #    # only work on cells on this node
+        #    if pc.gid_exists(gid):  
+        #        for name_src in ['L2Pyr', 'L2Basket', 'L5Pyr', 'L5Basket',
+        #                         'extinput', 'extgauss', 'extpois', 'ev']:
+        #            for nc in getattr(cell, 'ncfrom_%s' % name_src):
+        #                if nc.valid():
+        #                    # delete NEURON cell object
+        #                    cell_obj = nc.precell(gid)
+        #                    del cell_obj
+        #                    cell_obj = nc.postcell(gid)
+        #                    del cell_obj
+        #                    del nc
+
+        # clear gid info
+        pc.gid_clear()
+
