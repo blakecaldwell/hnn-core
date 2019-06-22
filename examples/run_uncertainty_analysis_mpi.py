@@ -122,6 +122,10 @@ if rank != 0:
     # tell rank 0 we are closing
     comm.send(None, dest=0, tag=tags.EXIT)
 
+    # send empty new_params to stop nrniv procs
+    subcomm.bcast(None, root=MPI.ROOT)
+    #subcomm.Barrier()
+
 if rank == 0:
     print("Master starting on %s" % name)
 
@@ -159,18 +163,21 @@ if rank == 0:
     # broadcast simdata to all of the workers
     comm.bcast(simdata, root=0)
 
-    def optimize_erp_2():  
+    def fun():
         pass
     # define the model to analyze
-    model = un.Model(run=optimize_erp_2, labels=["time (ms)", "dipole (nAm)"])
-    
+    model = un.Model(run=fun, labels=["time (ms)", "dipole (nAm)"])
+
+    if 'sim_prefix' in params_input:
+        model.name =  params_input['sim_prefix']
+
     def rmse_output(time, dipole_output, info):
         return None, info["rmse_output"]
     
     # define some parameter distributions to sample from
     t_evprox_1_dist = cp.Uniform(9,12)
-    t_evdist_1_dist = cp.Uniform(10,120)
-    t_evprox_2_dist = cp.Uniform(60,90)
+    t_evdist_1_dist = cp.Uniform(65,85)
+    t_evprox_2_dist = cp.Uniform(85,105)
     sigma_t_evprox_1_dist = cp.Uniform(1,8)
     #sigma_t_evprox_1_dist = cp.Uniform(1,15)
     gbar_evprox_1_L2Pyr_ampa_dist = cp.Uniform(0,1)
@@ -191,10 +198,14 @@ if rank == 0:
     gbar_evdist_1_L5Pyr_nmda_dist = cp.Uniform(0,5)
     sigma_t_evprox_2_dist = cp.Uniform(1,15)
     #sigma_t_evprox_2_dist = cp.Uniform(9,13)
-    gbar_evprox_2_L2Pyr_ampa_dist = cp.Uniform(28.23,68)
-    gbar_evprox_2_L2Basket_ampa_dist = cp.Uniform(0.0,0.0001)
-    gbar_evprox_2_L5Pyr_ampa_dist = cp.Uniform(29.87,70)
-    gbar_evprox_2_L5Basket_ampa_dist = cp.Uniform(0.0079,0.0279)
+    gbar_evprox_2_L2Pyr_ampa_dist = cp.Uniform(0,100)
+    gbar_evprox_2_L2Pyr_nmda_dist = cp.Uniform(0,1)
+    gbar_evprox_2_L2Basket_ampa_dist = cp.Uniform(0.0,0.001)
+    gbar_evprox_2_L2Basket_nmda_dist = cp.Uniform(0,1)
+    gbar_evprox_2_L5Pyr_ampa_dist = cp.Uniform(0,100)
+    gbar_evprox_2_L5Pyr_nmda_dist = cp.Uniform(0,1)
+    gbar_evprox_2_L5Basket_ampa_dist = cp.Uniform(0.0,0.1)
+    gbar_evprox_2_L5Basket_nmda_dist = cp.Uniform(0,1)
     
     parameters = {
     #    "sigma_t_evprox_1": sigma_t_evprox_1_dist,
@@ -207,20 +218,24 @@ if rank == 0:
     #    "gbar_evprox_1_L2Basket_nmda": gbar_evprox_1_L2Basket_nmda_dist,
     #    "gbar_evprox_1_L5Basket_ampa": gbar_evprox_1_L5Basket_ampa_dist,
     #    "gbar_evprox_1_L5Basket_nmda": gbar_evprox_1_L5Basket_nmda_dist,
-        "sigma_t_evdist_1": sigma_t_evdist_1_dist,
-        "t_evdist_1": t_evdist_1_dist,
-        "gbar_evdist_1_L2Pyr_ampa": gbar_evdist_1_L2Pyr_ampa_dist,
-        "gbar_evdist_1_L2Pyr_nmda": gbar_evdist_1_L2Pyr_nmda_dist,
-        "gbar_evdist_1_L2Basket_ampa": gbar_evdist_1_L2Basket_ampa_dist,
-        "gbar_evdist_1_L2Basket_nmda": gbar_evdist_1_L2Basket_nmda_dist,
-        "gbar_evdist_1_L5Pyr_ampa": gbar_evdist_1_L5Pyr_ampa_dist,
-        "gbar_evdist_1_L5Pyr_nmda": gbar_evdist_1_L5Pyr_nmda_dist,
-    #    "sigma_t_evprox_2": sigma_t_evprox_2_dist,
-    #    "t_evprox_2": t_evprox_2_dist,
-    #    "gbar_evprox_2_L2Pyr_ampa": gbar_evprox_2_L2Pyr_ampa_dist,
-    #    "gbar_evprox_2_L2Basket_ampa": gbar_evprox_2_L2Basket_ampa_dist,
-    #    "gbar_evprox_2_L5Pyr_ampa": gbar_evprox_2_L5Pyr_ampa_dist,
-    #    "gbar_evprox_2_L5Basket_ampa": gbar_evprox_2_L5Basket_ampa_dist,
+    #    "sigma_t_evdist_1": sigma_t_evdist_1_dist,
+    #    "t_evdist_1": t_evdist_1_dist,
+    #    "gbar_evdist_1_L2Pyr_ampa": gbar_evdist_1_L2Pyr_ampa_dist,
+    #    "gbar_evdist_1_L2Pyr_nmda": gbar_evdist_1_L2Pyr_nmda_dist,
+    #    "gbar_evdist_1_L2Basket_ampa": gbar_evdist_1_L2Basket_ampa_dist,
+    #    "gbar_evdist_1_L2Basket_nmda": gbar_evdist_1_L2Basket_nmda_dist,
+    #    "gbar_evdist_1_L5Pyr_ampa": gbar_evdist_1_L5Pyr_ampa_dist,
+    #    "gbar_evdist_1_L5Pyr_nmda": gbar_evdist_1_L5Pyr_nmda_dist,
+        "sigma_t_evprox_2": sigma_t_evprox_2_dist,
+        "t_evprox_2": t_evprox_2_dist,
+        "gbar_evprox_2_L2Pyr_ampa": gbar_evprox_2_L2Pyr_ampa_dist,
+        "gbar_evprox_2_L2Basket_ampa": gbar_evprox_2_L2Basket_ampa_dist,
+        "gbar_evprox_2_L5Pyr_ampa": gbar_evprox_2_L5Pyr_ampa_dist,
+        "gbar_evprox_2_L5Basket_ampa": gbar_evprox_2_L5Basket_ampa_dist,
+        "gbar_evprox_2_L2Pyr_nmda": gbar_evprox_2_L2Pyr_nmda_dist,
+        "gbar_evprox_2_L2Basket_nmda": gbar_evprox_2_L2Basket_nmda_dist,
+        "gbar_evprox_2_L5Pyr_nmda": gbar_evprox_2_L5Pyr_nmda_dist,
+        "gbar_evprox_2_L5Basket_nmda": gbar_evprox_2_L5Basket_nmda_dist,
     }
     
     feature_list = [rmse_output]

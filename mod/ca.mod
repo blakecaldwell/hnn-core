@@ -17,7 +17,6 @@ ENDCOMMENT
 INDEPENDENT {t FROM 0 TO 1 WITH 1 (ms)}
 
 NEURON {
-    THREADSAFE
     SUFFIX ca
     USEION ca READ eca WRITE ica
     RANGE m, h, gca, gbar
@@ -72,7 +71,7 @@ INITIAL {
 
 BREAKPOINT {
     SOLVE states METHOD cnexp
-    PROTECT gca = tadj * gbar * m * m * h
+    gca = tadj * gbar * m * m * h
     ica = (1e-4) * gca * (v - eca)
 }
 
@@ -109,23 +108,22 @@ PROCEDURE trates(v) {
 }
 
 PROCEDURE rates(vm) {
-    LOCAL a1, a2, b1, b2
+    LOCAL a, b
 
-    a1 = 0.055 * (-27 - vm) / (exp((-27 - vm) / 3.8) - 1)
-    b1 = 0.94 * exp((-75 - vm) / 17)
+    tadj = q10^((celsius - temp - tshift)/10)
+
+    a = 0.055 * (-27 - vm) / (exp((-27 - vm) / 3.8) - 1)
+    b = 0.94 * exp((-75 - vm) / 17)
+
+    mtau = 1 / tadj / (a+b)
+    minf = a / (a + b)
 
     : "h" inactivation
-    a2 = 0.000457 * exp((-13 - vm) / 50)
-    b2 = 0.0065 / (exp((-vm - 15) / 28) + 1)
+    a = 0.000457 * exp((-13 - vm) / 50)
+    b = 0.0065 / (exp((-vm - 15) / 28) + 1)
 
-    MUTEXLOCK
-    tadj = q10^((celsius - temp - tshift)/10)
-    mtau = 1 / tadj / (a1 + b1)
-    htau = 1 / tadj / (a2 + b2)
-    MUTEXUNLOCK
-
-    minf = a1 / (a1 + b1)
-    hinf = a2 / (a2 + b2)
+    htau = 1 / tadj / (a + b)
+    hinf = a / (a + b)
 }
 
 FUNCTION efun(z) {

@@ -5,7 +5,6 @@
 : last rev: (SL: added Qtotal back, used for par calc)
 
 NEURON {
-    THREADSAFE
     POINT_PROCESS Dipole
     RANGE ri, ia, Q, ztan
     POINTER pv

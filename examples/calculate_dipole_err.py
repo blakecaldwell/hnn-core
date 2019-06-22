@@ -46,6 +46,10 @@ while True:
     # receive params
     new_params = comm.bcast(rank, root=0)
 
+    # exit if we received empty params
+    if new_params is None:
+        break
+
     # to make sure we don't have stale params, use the line below
     #params = base_params.copy()
     # note: this not possible with a sweep over the same params
@@ -88,7 +92,7 @@ while True:
         comm.send(data, dest=0)
 
         # write params to file with RMSE
-        params.write(unique=True)
+        params.write(unique=False)
 
         if verbose:
            print("Avg. RMSE:", params['avg_RMSE'])
@@ -97,5 +101,6 @@ while True:
     net.gid_clear()
     del net
 
+#comm.Barrier()
 shutdown()
 
