@@ -20,7 +20,7 @@ from os import environ
 # Let us import mne_neuron
 
 import mne_neuron
-from mne_neuron import simulate_dipole, average_dipoles, Params, Network
+from mne_neuron import simulate_dipole, average_dipoles, Dipole, Params, Network
 from mne_neuron import get_rank, shutdown
 
 mne_neuron_root = op.join(op.dirname(mne_neuron.__file__), '..')
@@ -31,38 +31,55 @@ mne_neuron_root = op.join(op.dirname(mne_neuron.__file__), '..')
 from mpi4py import MPI
 import numpy as np
 
-comm = MPI.Comm.Get_parent()
-rank = comm.Get_rank()
+try:
+    comm = MPI.Comm.Get_parent()
+    rank = comm.Get_rank()
 
-# receive extdata and params
-(extdata, base_params_input) = comm.bcast(rank, root=0)
-base_params = Params().from_obj(base_params_input)
+    # receive extdata and params
+    (extdata, base_params_input) = comm.bcast(rank, root=0)
+    base_params = Params().from_obj(base_params_input)
 
-# if run by MPI, suppress output
-verbose = False
+    # if run by MPI, suppress output and wait for more input
+    verbose = False
+    loop = True
 
-sim_params = {}
+except MPI.Exception:
+    params_fname = op.join(mne_neuron_root, 'param', 'default.json')
+    base_params = Params(params_fname)
+
+    ###############################################################################
+    # Read the dipole data file to compare against
+
+    extdata = loadtxt('yes_trial_S1_ERP_all_avg.txt')
+
+    verbose = True
+    loop = False
+
 while True:
-    # receive params
-    new_params = comm.bcast(rank, root=0)
-
-    # exit if we received empty params
-    if new_params is None:
-        break
-
     # to make sure we don't have stale params, use the line below
     #params = base_params.copy()
     # note: this not possible with a sweep over the same params
     params = base_params
 
-    # set new params
-    for key, value in new_params.items():
-        params[key] = value
+    if loop:
+        # receive params
+        new_params = comm.bcast(rank, root=0)
+
+        # exit if we received empty params
+        if new_params is None:
+            break
+
+        # set new params
+        for key, value in new_params.items():
+            params[key] = value
 
     ###############################################################################
     # Build our Network and set up parallel simulation
 
     net = Network(params)
+
+    if not 'tstart' in params:
+        params['tstart'] = 0
 
     ###############################################################################
     # Get number of trials
@@ -81,18 +98,24 @@ while True:
     dpls = [None]*ntrials
     errs = np.zeros(ntrials)
     for trial in range(ntrials):
-        dpls[trial], errs[trial] = simulate_dipole(net, trial=trial,
-                                                   verbose=False, extdata=extdata)
+        dpls[trial] = simulate_dipole(net, trial=trial,
+                                      verbose=verbose)
 
     if get_rank() == 0:
-        params['avg_RMSE'] =  mean(errs)
-        # send results back to parent
-        data = np.array([np.array(average_dipoles(dpls).dpl['agg']).T,
-                        [params['avg_RMSE'], params['tstop']]])
-        comm.send(data, dest=0)
+        # calculate RMSE
+        avg_dpl = average_dipoles(dpls)
+        exp_dpl = Dipole(extdata[:,0], np.c_[extdata[:,1]])
+        avg_rmse = avg_dpl.rmse(exp_dpl, params['tstart'], params['tstop'])
+        params['avg_RMSE'] =  avg_rmse
 
-        # write params to file with RMSE
-        params.write(unique=False)
+        if loop:
+            # send results back to parent
+            data = np.array([np.array(avg_dpl.dpl['agg']).T,
+                            [params['avg_RMSE'], params['tstop']]])
+            comm.send(data, dest=0)
+
+            # write params to file with RMSE
+            params.write(unique=False)
 
         if verbose:
            print("Avg. RMSE:", params['avg_RMSE'])
@@ -100,6 +123,9 @@ while True:
     # reset the network
     net.gid_clear()
     del net
+
+    if not loop:
+        break
 
 #comm.Barrier()
 shutdown()

@@ -1,4 +1,4 @@
-from .dipole import simulate_dipole, average_dipoles
+from .dipole import simulate_dipole, average_dipoles, Dipole
 from .params import Params
 from .network import Network
 from .pyramidal import L2Pyr, L5Pyr

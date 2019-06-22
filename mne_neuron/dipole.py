@@ -13,26 +13,16 @@ def _hammfilt(x, winsz):
     win /= sum(win)
     return convolve(x, win, 'same')
 
+def get_index_at_time(dpl, t):
+    """Check that the time has an index and return it"""
+    import numpy as np
 
-def rmse(a1, a2):
-    from numpy import sqrt
+    indices = np.where(dpl.t==t)[0]
+    if len(indices) < 1:
+        print("Error, invalid start time for dipole")
+        return
 
-    # return root mean squared error between a1, a2; assumes same lengths
-    # and sampling rates
-    len1, len2 = len(a1), len(a2)
-    sz = min(len1, len2)
-    return sqrt(((a1[0:sz] - a2[0:sz]) ** 2).mean())
-
-
-def calcerr(ddat):
-    from scipy import signal
-
-    # calculates RMSE error from ddat
-    # first downsample simulation timeseries to 600 Hz
-    # (assumes same time length as data)
-    dpldown = signal.resample(ddat['dpl']['agg'], len(ddat['dextdata']))
-    err0 = rmse(ddat['dextdata'][:, 1], dpldown)
-    return err0
+    return indices[0]
 
 
 def initialize_sim(net):
@@ -93,8 +83,6 @@ def simulate_dipole(net, trial=0, verbose=True, extdata=None):
     -------
     dpl: instance of Dipole
         The dipole object
-    err: float
-        RMSE between trial and extdata or None if no extdata
     """
     from .parallel import rank, nhosts, pc, cvode
 
@@ -130,12 +118,12 @@ def simulate_dipole(net, trial=0, verbose=True, extdata=None):
 
     h.fcurrent()
 
-    #pc.barrier()  # get all nodes to this place before continuing
+    pc.barrier()  # get all nodes to this place before continuing
 
     # actual simulation - run the solver
     pc.psolve(h.tstop)
 
-    #pc.barrier()
+    pc.barrier()
 
     # these calls aggregate data across procs/nodes
     pc.allreduce(dp_rec_L2, 1)
@@ -143,18 +131,20 @@ def simulate_dipole(net, trial=0, verbose=True, extdata=None):
     pc.allreduce(dp_rec_L5, 1)
     # aggregate the currents independently on each proc
     net.aggregate_currents()
+    pc.barrier()
     # combine net.current{} variables on each proc
     pc.allreduce(net.current['L5Pyr_soma'], 1)
     pc.allreduce(net.current['L2Pyr_soma'], 1)
 
     #pc.barrier()  # get all nodes to this place before continuing
 
-    dpl_data = np.c_[np.array(dp_rec_L2.to_python()) +
-                     np.array(dp_rec_L5.to_python()),
-                     np.array(dp_rec_L2.to_python()),
-                     np.array(dp_rec_L5.to_python())]
+    if rank == 0:
+        dpl_data = np.c_[np.array(dp_rec_L2.to_python()) +
+                        np.array(dp_rec_L5.to_python()),
+                        np.array(dp_rec_L2.to_python()),
+                        np.array(dp_rec_L5.to_python())]
 
-    dpl = Dipole(np.array(t_vec.to_python()), dpl_data)
+        dpl = Dipole(np.array(t_vec.to_python()), dpl_data)
 
     err = 0
     if rank == 0:
@@ -166,17 +156,7 @@ def simulate_dipole(net, trial=0, verbose=True, extdata=None):
         dpl.scale(net.params['dipole_scalefctr'])
         dpl.smooth(net.params['dipole_smooth_win'] / h.dt)
 
-        try:
-            if extdata.any():
-                ddat = {'dpl': dpl.dpl, 'dextdata': extdata}
-                err = calcerr(ddat)
-                if verbose:
-                    print("RMSE:", err)
-        except AttributeError:
-            # extdata is not an array
-            pass
-
-    return dpl, err
+    return dpl
 
 
 def average_dipoles(dpls):
@@ -219,20 +199,30 @@ class Dipole(object):
     data : array (n_times x 3)
         The data. The first column represents 'agg',
         the second 'L2' and the last one 'L5'
+    data_cols: int | None
+        The number of columns present in data. Must
+        be in order 'agg', 'L2', 'L5'. Default is 3
+        for HNN compatibility.
 
     Attributes
     ----------
     t : array
         The time vector
     dpl : dict of array
-        The dipole with keys 'agg', 'L2' and 'L5'
+        The dipole with key 'agg' and optionally, 'L2' and 'L5'
     """
 
-    def __init__(self, times, data):  # noqa: D102
+    def __init__(self, times, data, data_cols=3):  # noqa: D102
         self.units = 'fAm'
         self.N = data.shape[0]
         self.t = times
-        self.dpl = {'agg': data[:, 0], 'L2': data[:, 1], 'L5': data[:, 2]}
+        self.dpl = {}
+        if data_cols > 0:
+            self.dpl['agg'] = data[:, 0]
+        if data_cols > 1:
+            self.dpl['L2'] = data[:, 1]
+        if data_cols > 2:
+            self.dpl['L5'] = data[:, 2]
 
     # conversion from fAm to nAm
     def convert_fAm_to_nAm(self):
@@ -295,6 +285,10 @@ class Dipole(object):
             print("Warning, no dipole renormalization done because units"
                   " were in %s" % (self.units))
             return
+        elif (not 'L2' in self.dpl) and (not 'L5' in self.dpl):
+            print("Warning, no dipole renormalization done because"
+                  " L2 and L5 components are not available")
+            return
 
         N_pyr_x = params['N_pyr_x']
         N_pyr_y = params['N_pyr_y']
@@ -348,6 +342,32 @@ class Dipole(object):
         fname : str
             Full path to the output file (.txt)
         """
-        X = np.r_[[self.t, self.dpl['agg'], self.dpl['L2'], self.dpl['L5']]].T
+        cols = [self.dpl.get(key) for key in ['agg', 'L2', 'L5'] if (key in self.dpl)]
+        X = np.r_[[self.t] + cols].T
         np.savetxt(fname, X, fmt=['%3.3f', '%5.4f', '%5.4f', '%5.4f'],
                    delimiter='\t')
+
+    def rmse(self, exp_dpl, tstart, tstop):
+        """ Calculates RMSE compared to data in exp_dpl """
+        from numpy import sqrt
+        from scipy import signal
+
+        # make sure start and end times are valid for both dipoles
+        exp_start_index = get_index_at_time(exp_dpl, tstart)
+        exp_end_index = get_index_at_time(exp_dpl, tstop)
+        exp_length = exp_end_index - exp_start_index
+
+        sim_start_index = get_index_at_time(self, tstart)
+        sim_end_index = get_index_at_time(self, tstop)
+        sim_length = sim_end_index - sim_start_index
+
+        dpl1 = self.dpl['agg'][sim_start_index:sim_end_index]
+        dpl2 = exp_dpl.dpl['agg'][exp_start_index:exp_end_index]
+        if (sim_length > exp_length):
+            # downsample simulation timeseries to match exp data
+            dpl1 = signal.resample(dpl1, exp_length)
+        elif (sim_length < exp_length):
+            # downsample exp timeseries to match simulation data
+            dpl2 = signal.resample(dpl2, sim_length)
+
+        return sqrt(((dpl1 - dpl2) ** 2).mean())
