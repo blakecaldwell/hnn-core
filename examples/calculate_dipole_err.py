@@ -104,7 +104,7 @@ while True:
     if get_rank() == 0:
         # calculate RMSE
         avg_dpl = average_dipoles(dpls)
-        exp_dpl = Dipole(extdata[:,0], np.c_[extdata[:,1]])
+        exp_dpl = Dipole(extdata[:,0], np.c_[extdata[:,1]], data_cols=1)
         avg_rmse = avg_dpl.rmse(exp_dpl, params['tstart'], params['tstop'])
         params['avg_RMSE'] =  avg_rmse
 
