@@ -44,7 +44,7 @@ def create_parallel_context(n_jobs=None):
     cvode.active(0)
 
     # use cache_efficient mode for allocating elements in contiguous order
-    #cvode.cache_efficient(1)
+    cvode.cache_efficient(1)
 
     # sets the default max solver step in ms (purposefully large)
     pc.set_maxstep(10)

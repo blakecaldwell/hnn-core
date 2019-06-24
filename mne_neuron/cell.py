@@ -7,8 +7,8 @@ import numpy as np
 from neuron import h
 
 # global variables, should be node-independent
-h("dp_total_L2 = 0.")
-h("dp_total_L5 = 0.")  # put here since these variables used in cells
+#h("dp_total_L2 = 0.")
+#h("dp_total_L5 = 0.")  # put here since these variables used in cells
 
 # Units for e: mV
 # Units for gbar: S/cm^2
@@ -31,6 +31,8 @@ class _Cell(object):
         # variable for the list_IClamp
         self.list_IClamp = None
         self.soma_props = soma_props
+        # N_segs will be summed for Pyr type cells
+        self.N_segs = 0
         self.create_soma()
         # par: create arbitrary lists of connections FROM other cells
         # TO this cell instantiation
@@ -149,8 +151,11 @@ class _Cell(object):
     # 1. dipole needs to be inserted into each section
     # 2. a list needs to be created with a Dipole (Point Process) in each
     #    section at position 1
-    # In Cell() and not Pyr() for future possibilities
-    def dipole_insert(self, yscale):
+    # In Cell() and not Pyr() for future possibilities.
+    # However, only called from pyramidal cells and not basket cells
+    def _dipole_insert(self, N_cells, max_segs):
+        from .parallel import pc, rank
+
         # insert dipole into each section of this cell
         # dends must have already been created!!
         # it's easier to use wholetree here, this includes soma
@@ -163,16 +168,29 @@ class _Cell(object):
         # Dipole is defined in dipole_pp.mod
         self.dipole_pp = [h.Dipole(1, sec=sect) for sect in self.list_all]
         # setting pointers and ztan values
+        seg_index = 0
+        n_pointers = 4 # overkill
+        base = max_segs * N_cells * rank
         for sect, dpp in zip(self.list_all, self.dipole_pp):
             # assign internal resistance values to dipole point process (dpp)
             dpp.ri = h.ri(1, sec=sect)
             # sets pointers in dipole mod file to the correct locations
             # h.setpointer(ref, ptr, obj)
-            h.setpointer(sect(0.99)._ref_v, 'pv', dpp)
-            if self.celltype.startswith('L2'):
-                h.setpointer(h._ref_dp_total_L2, 'Qtotal', dpp)
-            elif self.celltype.startswith('L5'):
-                h.setpointer(h._ref_dp_total_L5, 'Qtotal', dpp)
+            sect.push()
+            #print('rank %d, gid %d using gid_count %d'%(rank, self.gid, base + self.gid * max_segs + seg_index))
+            pc.source_var(sect(0.99)._ref_v, base + self.gid * max_segs + seg_index, sec=sect)
+            #if self.celltype.startswith('L2'):
+            #    pc.source_var(h._ref_dp_total_L2, base + self.gid * max_segs + seg_index, sec=sect)
+            #    h.setpointer(h._ref_dp_total_L2, 'Qtotal', dpp)
+            #elif self.celltype.startswith('L5'):
+            #    pc.source_var(h._ref_dp_total_L5, base + self.gid * max_segs + seg_index, sec=sect)
+            #    h.setpointer(h._ref_dp_total_L5, 'Qtotal', dpp)
+            #seg_index = seg_index + 1
+            h.pop_section()
+            pc.target_var(dpp, dpp._ref_pv, base + self.gid * max_segs + seg_index)
+            seg_index = seg_index + 1
+            #pc.target_var(dpp, dpp._ref_Qtotal, base + self.gid * max_segs + seg_index)
+            #h.setpointer(sect(0.99)._ref_v, 'pv', dpp)
             # gives INTERNAL segments of the section, non-endpoints
             # creating this because need multiple values simultaneously
             loc = np.array([seg.x for seg in sect])
@@ -180,7 +198,7 @@ class _Cell(object):
             pos = np.array([seg.x for seg in sect.allseg()])
             # diff in yvals, scaled against the pos np.array. y_long as
             # in longitudinal
-            y_scale = (yscale[sect.name()] * sect.L) * pos
+            y_scale = (self.yscale[sect.name()] * sect.L) * pos
             # y_long = (h.y3d(1, sec=sect) - h.y3d(0, sec=sect)) * pos
             # diff values calculate length between successive section points
             y_diff = np.diff(y_scale)
@@ -193,19 +211,27 @@ class _Cell(object):
                 # range variable 'dipole'
                 # set pointers to previous segment's voltage, with
                 # boundary condition
+                #print('rank %d, gid %d using gid_count %d'%(rank, self.gid, base + self.gid * max_segs + seg_index))
+                #sect.push()
                 if i:
-                    h.setpointer(sect(loc[i - 1])._ref_v,
-                                 'pv', sect(loc[i]).dipole)
+                    pc.source_var(sect(loc[i - 1])._ref_v, base + self.gid * max_segs + seg_index, sec=sect)
+                    pc.target_var(dpp, sect(loc[i]).dipole._ref_pv, base + self.gid * max_segs + seg_index)
+                    #h.setpointer(sect(loc[i - 1])._ref_v,
+                    #             'pv', sect(loc[i]).dipole)
                 else:
-                    h.setpointer(sect(0)._ref_v, 'pv', sect(loc[i]).dipole)
-                # set aggregate pointers
-                h.setpointer(dpp._ref_Qsum, 'Qsum', sect(loc[i]).dipole)
-                if self.celltype.startswith('L2'):
-                    h.setpointer(h._ref_dp_total_L2, 'Qtotal',
-                                 sect(loc[i]).dipole)
-                elif self.celltype.startswith('L5'):
-                    h.setpointer(h._ref_dp_total_L5, 'Qtotal',
-                                 sect(loc[i]).dipole)
+                    pc.source_var(sect(0)._ref_v, base + self.gid * max_segs + seg_index, sec=sect)
+                    pc.target_var(dpp, sect(loc[i]).dipole._ref_pv, base + self.gid * max_segs + seg_index)
+                    #h.setpointer(sect(0)._ref_v, 'pv', sect(loc[i]).dipole)
+                #h.pop_section()
+                seg_index = seg_index + 1
+                ## set aggregate pointers
+                #h.setpointer(dpp._ref_Qsum, 'Qsum', sect(loc[i]).dipole)
+                #if self.celltype.startswith('L2'):
+                #    h.setpointer(h._ref_dp_total_L2, 'Qtotal',
+                #                 sect(loc[i]).dipole)
+                #elif self.celltype.startswith('L5'):
+                #    h.setpointer(h._ref_dp_total_L5, 'Qtotal',
+                #                 sect(loc[i]).dipole)
                 # add ztan values
                 sect(loc[i]).dipole.ztan = y_diff[i]
             # set the pp dipole's ztan value to the last value from y_diff

@@ -13,11 +13,12 @@ def _hammfilt(x, winsz):
     win /= sum(win)
     return convolve(x, win, 'same')
 
+
 def get_index_at_time(dpl, t):
     """Check that the time has an index and return it"""
     import numpy as np
 
-    indices = np.where(dpl.t==t)[0]
+    indices = np.where(np.around(dpl.t, decimals=4) == t)[0]
     if len(indices) < 1:
         print("Error, invalid start time for dipole")
         return
@@ -52,13 +53,14 @@ def initialize_sim(net):
     h.celsius = net.params['celsius']  # 37.0 - set temperature
 
     # create or reinitialize scalars in NEURON (hoc) context
-    h("dp_total_L2 = 0.")
-    h("dp_total_L5 = 0.")
+    #h("dp_total_L2 = 0.")
+    #h("dp_total_L5 = 0.")
 
     # Connect NEURON scalar references to python vectors
-    t_vec = h.Vector(int(h.tstop / h.dt + 1)).record(h._ref_t)  # time recording
-    dp_rec_L2 = h.Vector(int(h.tstop / h.dt + 1)).record(h._ref_dp_total_L2)  # L2 dipole recording
-    dp_rec_L5 = h.Vector(int(h.tstop / h.dt + 1)).record(h._ref_dp_total_L5)  # L5 dipole recording
+    t_vec = dp_rec_L2 = dp_rec_L5 = None
+    #t_vec = h.Vector(int(h.tstop / h.dt + 1)).record(h._ref_t)  # time recording
+    #dp_rec_L2 = h.Vector(int(h.tstop / h.dt + 1)).record(h._ref_dp_total_L2)  # L2 dipole recording
+    #dp_rec_L5 = h.Vector(int(h.tstop / h.dt + 1)).record(h._ref_dp_total_L5)  # L5 dipole recording
 
     return t_vec, dp_rec_L2, dp_rec_L5
 
@@ -88,7 +90,6 @@ def simulate_dipole(net, trial=0, verbose=True, extdata=None):
 
     from neuron import h
     h.load_file("stdrun.hoc")
-
     t_vec, dp_rec_L2, dp_rec_L5 = initialize_sim(net)
 
     # make sure network state is consistent
@@ -98,11 +99,13 @@ def simulate_dipole(net, trial=0, verbose=True, extdata=None):
         # for reproducibility of original HNN results
         net.reset_src_event_times()
 
+    pc.setup_transfer()
     # Now let's simulate the dipole
 
-    if verbose and rank == 0:
+    if verbose:
         pc.barrier()  # sync for output to screen
-        print("Running trial %d (on %d cores)" % (trial + 1, nhosts))
+        if rank == 0:
+            print("Running trial %d (on %d cores)" % (trial + 1, nhosts))
 
     # initialize cells to -65 mV, after all the NetCon
     # delays have been specified
@@ -118,12 +121,14 @@ def simulate_dipole(net, trial=0, verbose=True, extdata=None):
 
     h.fcurrent()
 
-    pc.barrier()  # get all nodes to this place before continuing
+    #pc.barrier()  # get all nodes to this place before continuing
 
     # actual simulation - run the solver
     pc.psolve(h.tstop)
 
+    dpl = None
     pc.barrier()
+    return dpl
 
     # these calls aggregate data across procs/nodes
     pc.allreduce(dp_rec_L2, 1)
@@ -131,7 +136,7 @@ def simulate_dipole(net, trial=0, verbose=True, extdata=None):
     pc.allreduce(dp_rec_L5, 1)
     # aggregate the currents independently on each proc
     net.aggregate_currents()
-    pc.barrier()
+    #pc.barrier()
     # combine net.current{} variables on each proc
     pc.allreduce(net.current['L5Pyr_soma'], 1)
     pc.allreduce(net.current['L2Pyr_soma'], 1)
@@ -148,13 +153,13 @@ def simulate_dipole(net, trial=0, verbose=True, extdata=None):
 
     err = 0
     if rank == 0:
-        if net.params['save_dpl']:
-            dpl.write('rawdpl_%d.txt' % trial)
+        #dpl.baseline_renormalize(net.params)
+        #dpl.convert_fAm_to_nAm()
+        #dpl.scale(net.params['dipole_scalefctr'])
+        #dpl.smooth(net.params['dipole_smooth_win'] / h.dt)
 
-        dpl.baseline_renormalize(net.params)
-        dpl.convert_fAm_to_nAm()
-        dpl.scale(net.params['dipole_scalefctr'])
-        dpl.smooth(net.params['dipole_smooth_win'] / h.dt)
+        if net.params['save_dpl']:
+            dpl.write('dpl_%d.txt' % trial)
 
     return dpl
 
@@ -199,10 +204,6 @@ class Dipole(object):
     data : array (n_times x 3)
         The data. The first column represents 'agg',
         the second 'L2' and the last one 'L5'
-    data_cols: int | None
-        The number of columns present in data. Must
-        be in order 'agg', 'L2', 'L5'. Default is 3
-        for HNN compatibility.
 
     Attributes
     ----------
@@ -212,17 +213,14 @@ class Dipole(object):
         The dipole with key 'agg' and optionally, 'L2' and 'L5'
     """
 
-    def __init__(self, times, data, data_cols=3):  # noqa: D102
+    def __init__(self, times, data):  # noqa: D102
         self.units = 'fAm'
         self.N = data.shape[0]
         self.t = times
         self.dpl = {}
-        if data_cols > 0:
-            self.dpl['agg'] = data[:, 0]
-        if data_cols > 1:
-            self.dpl['L2'] = data[:, 1]
-        if data_cols > 2:
-            self.dpl['L5'] = data[:, 2]
+        self.dpl['agg'] = data[:, 0]
+        self.dpl['L2'] = data[:, 1]
+        self.dpl['L5'] = data[:, 2]
 
     # conversion from fAm to nAm
     def convert_fAm_to_nAm(self):
@@ -353,13 +351,14 @@ class Dipole(object):
         from scipy import signal
 
         # make sure start and end times are valid for both dipoles
+        sim_start_index = get_index_at_time(self, tstart)
+        sim_end_index = get_index_at_time(self, tstop)
+        sim_length = sim_end_index - sim_start_index
+
         exp_start_index = get_index_at_time(exp_dpl, tstart)
         exp_end_index = get_index_at_time(exp_dpl, tstop)
         exp_length = exp_end_index - exp_start_index
 
-        sim_start_index = get_index_at_time(self, tstart)
-        sim_end_index = get_index_at_time(self, tstop)
-        sim_length = sim_end_index - sim_start_index
 
         dpl1 = self.dpl['agg'][sim_start_index:sim_end_index]
         dpl2 = exp_dpl.dpl['agg'][exp_start_index:exp_end_index]

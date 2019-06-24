@@ -33,8 +33,9 @@ class Network(object):
     def __init__(self, params, n_jobs=None):
         from .parallel import create_parallel_context
         # setup simulation (ParallelContext)
+        print('starting network build')
         create_parallel_context(n_jobs=n_jobs)
-
+        print('here')
         # set the params internally for this net
         # better than passing it around like ...
         self.params = params
@@ -101,17 +102,26 @@ class Network(object):
         # initialize the lists in the dict
         for key in self.ext_list.keys():
             self.ext_list[key] = []
-        # create sources and init
+        # create cells, sources and init
+        print('here1')
         self._create_all_src()
+        # insert dipole into pyramidal cells
+        self._set_max_segs()
+        self._dipole_insert_cells()
         self.state_init()
         # parallel network connector
         self._parnet_connect()
+        print('here1')
         # set to record spikes
         self.spiketimes = h.Vector()
+        print('here2')
         self.spikegids = h.Vector()
+        print('here3')
         self._record_spikes()
         # position cells in 3D grid
+        print('here4')
         self.move_cells_to_pos()
+        print('finished building Network')
 
     def __repr__(self):
         class_name = self.__class__.__name__
@@ -290,6 +300,7 @@ class Network(object):
 
         from .parallel import pc
 
+        print('here2')
         # loop through gids on this node
         for gid in self._gid_list:
             # check existence of gid with Neuron
@@ -307,18 +318,23 @@ class Network(object):
                 if type in ('L2_pyramidal', 'L5_pyramidal', 'L2_basket',
                             'L5_basket'):
                     Cell = type2class[type]
+                    print('gid %d (%s) here3'%(gid, type))
                     if type in ('L2_pyramidal', 'L5_pyramidal'):
                         self.cells.append(Cell(gid, pos, self.params))
                     else:
                         self.cells.append(Cell(gid, pos))
+                    print('gid %d here4'%gid)
                     pc.cell(
                         gid, self.cells[-1].connect_to_target(
                             None, self.params['threshold']))
+                    print('gid %d here5'%gid)
                     # run the IClamp function here
                     # create_all_IClamp() is defined in L2Pyr (etc)
                     self.cells[-1].create_all_IClamp(self.params)
+                    print('gid %d here6'%gid)
                     if self.params['save_vsoma']:
                         self.cells[-1].record_volt_soma()
+                    print('gid %d here7'%gid)
                 elif type == 'extinput':
                     # print('type',type)
                     # to find param index, take difference between REAL gid
@@ -354,21 +370,25 @@ class Network(object):
     # nc = pc.gid_connect(source_gid, target_syn), weight,delay
     # Both for synapses AND for external inputs
     def _parnet_connect(self):
-        from .parallel import pc
+        from .parallel import pc, rank
 
+        print('%d: enter'%(rank))
         # loop over target zipped gids and cells
         # cells has NO extinputs anyway. also no extgausses
         for gid, cell in zip(self._gid_list, self.cells):
             # ignore iteration over inputs, since they are NOT targets
             if pc.gid_exists(gid) and self.gid_to_type(gid) \
                     != 'extinput':
+                print('%d: cell %d'%(rank, gid))
                 # for each gid, find all the other cells connected to it,
                 # based on gid
                 # this MUST be defined in EACH class of cell in self.cells
                 # parconnect receives connections from other cells
                 # parreceive receives connections from external inputs
                 cell.parconnect(gid, self.gid_dict, self.pos_dict, self.params)
+                print('%d: cell %d after parconnect'%(rank, gid))
                 cell.parreceive(gid, self.gid_dict, self.pos_dict, self.p_ext)
+                print('%d: cell %d after parreceieve'%(rank, gid))
                 # now do the unique inputs specific to these cells
                 # parreceive_ext receives connections from UNIQUE
                 # external inputs
@@ -376,6 +396,7 @@ class Network(object):
                     p_type = self.p_unique[type]
                     cell.parreceive_ext(
                         type, gid, self.gid_dict, self.pos_dict, p_type)
+        print('%d: leaving'%(rank))
 
     # setup spike recording for this node
     def _record_spikes(self):
@@ -507,7 +528,7 @@ class Network(object):
 
     def gid_clear(self):
         """Clear up NEURON internal gid information"""
-        from .parallel import pc
+        from .parallel import pc, rank
 
         # dereference cell and NetConn objects
         #for gid, cell in zip(self._gid_list, self.cells):
@@ -527,3 +548,26 @@ class Network(object):
         # clear gid info
         pc.gid_clear()
 
+    def _set_max_segs(self):
+        from .parallel import pc
+
+        L2_segs = 0
+        L5_segs = 0
+        for gid, cell in zip(self._gid_list, self.cells):
+            if pc.gid_exists(gid):  
+                if cell.celltype == 'L5_pyramidal':
+                    L5_segs = cell.N_segs
+                    break
+                elif cell.celltype == 'L2_pyramidal':
+                    L2_segs = cell.N_segs
+
+        self.max_segs = max(L5_segs, L2_segs)
+
+    def _dipole_insert_cells(self):
+        from .parallel import pc
+
+        for gid, cell in zip(self._gid_list, self.cells):
+            # only work on cells on this node
+            if pc.gid_exists(gid):  
+                if cell.celltype in ('L5_pyramidal', 'L2_pyramidal'):
+                    cell.dipole_insert(self.N_cells, self.max_segs)

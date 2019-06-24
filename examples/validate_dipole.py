@@ -32,7 +32,14 @@ from mpi4py import MPI
 import numpy as np
 
 # default is to loop once unless set in params
-max_loops = 1
+max_loops = 100
+
+# simulate truncating digits
+# modified from https://realpython.com/python-rounding/#truncation
+# to correct decimal places index 
+def truncate(n, decimals=0):
+    multiplier = 10 ** (decimals)
+    return int(n * multiplier) / multiplier
 
 try:
     comm = MPI.Comm.Get_parent()
@@ -40,6 +47,9 @@ try:
 
     # receive extdata and params
     (extdata, base_params_input) = comm.bcast(rank, root=0)
+    if 'max_loops' in base_params_input:
+        max_loops = int(base_params_input['max_loops'])
+
     params = Params().from_obj(base_params_input)
 
     # if run by MPI, suppress output and wait for more input
@@ -52,25 +62,24 @@ except MPI.Exception:
     ###############################################################################
     # Read the dipole data file to compare against
 
-    extdata1 = loadtxt('default_hnn_trial1.txt')
-    extdata2 = loadtxt('default_hnn_trial2.txt')
-    extdata3 = loadtxt('default_hnn_trial3.txt')
-    extdata4 = loadtxt('default_hnn_trial4.txt')
-    extdata5 = loadtxt('default_hnn_trial5.txt')
-    extdata = [extdata1, extdata2, extdata3, extdata4, extdata5]
+    extdata = []
+    for i in range (5):
+        extdata.append(loadtxt('default_hnn_trial%d.txt' % i))
 
+#    verbose = True
     verbose = True
 
-if 'max_loops' in params:
-    max_loops = params['max_loops']
 
 ###############################################################################
 # Build our Network and set up parallel simulation
 
-net = Network(params)
-
+avg_sim_times = []
 loop = 0
+max_threshold = 0.0
+done = False
 while loop < max_loops:
+
+    net = Network(params)
 
     ###############################################################################
     # Get number of trials
@@ -86,25 +95,84 @@ while loop < max_loops:
     ###############################################################################
     # Now let's simulate the dipole
 
+    decimals = 5
+
+
+    # Start clock
+    start = MPI.Wtime()
+
     for trial in range(ntrials):
         dpl = simulate_dipole(net, trial=trial,
                                       verbose=verbose)
+        continue
 
         if get_rank() == 0:
-            # calculate RMSE
-            exp_dpl = Dipole(extdata[trial][:,0], np.c_[extdata[trial][:,1]], data_cols=1)
-            rmse = dpl.rmse(exp_dpl, 0, params['tstop'])
+            data = np.c_[extdata[trial][:,1],
+                         extdata[trial][:,2],
+                         extdata[trial][:,3]]
+            exp_dpl = Dipole(extdata[trial][:,0], data)
 
-            if not rmse == 0.0:
-                print('Error: RMSE is %d' % rmse)
-                loop = max_loops
 
-            if not exp_dpl.dpl['agg'] == dpl.dpl['agg']:
-                print('Error: dipoles are not equal')
-                loop = max_loops
+            for cell_dipole in ['L2', 'L5']:
+                rounded_dpl = np.around(dpl.dpl[cell_dipole], decimals=8)
+                rounded_exp_dpl = np.around(exp_dpl.dpl[cell_dipole], decimals=8)
+                diffs = np.logical_not(rounded_dpl == rounded_exp_dpl)
+                indices = np.where(diffs == True)[0]
+    
+                # check the differences (if any) for truncation instead
+                # of rounding
+                true_diffs = []
+                for index in indices:
+#                    if not (truncate(dpl.dpl[cell_dipole][index], decimals) ==
+#                            truncate(exp_dpl.dpl[cell_dipole][index], decimals)):
+                    difference = abs(dpl.dpl[cell_dipole][index] - exp_dpl.dpl[cell_dipole][index])
+                    if difference > max_threshold:
+                         print('new threshold = %.12f' % max_threshold)
+                         max_threshold = difference
+#                        true_diffs.append(index)
 
-    loop = loop + 1
+                    if len(true_diffs) > 0:
+                        print('ERROR: %s dipoles are not equal: %d Values differ' %
+                              (cell_dipole, len(true_diffs)) +
+                              ' even after truncation to %d decimal places' %
+                              decimals)
+                        print('Starting at time=%03.3fs: sim=%5.15f exper=%5.15f' %
+                              (dpl.t[index],
+#                               truncate(dpl.dpl[cell_dipole][index], decimals),
+#                               truncate(exp_dpl.dpl[cell_dipole][index], decimals)))
+                               dpl.dpl[cell_dipole][index],
+                               exp_dpl.dpl[cell_dipole][index]))
+                        print('Different times: %s' %
+                              true_diffs)
+                        # calculate RMSE
+                        rmse = dpl.rmse(exp_dpl, 0.0, float(params['tstop']))
+                        print("RMSE is %.8f \n" % rmse)
+                        done = True
+                        break
+ 
+                if done:
+                    break
+#                elif len(indices) > 0:
+#                    print('All %d %s differences were resolved by truncating to' %
+#                          ((len(indices) -len(true_diffs)), cell_dipole) +
+#                          ' %d ' % decimals + 'digits')
 
-#comm.Barrier()
+    if done:
+        loop = max_loops
+        break
+    else:
+        loop = loop + 1
+
+    # reset the network
+    net.gid_clear()
+    del net
+
+    finish = MPI.Wtime() - start
+    avg_sim_times.append(finish)
+    if get_rank() == 0:
+        print('took %.2fs for simulation (avg=%.2fs)' % (finish, mean(avg_sim_times)))
+
+
+print('ending validation')
 shutdown()
 
