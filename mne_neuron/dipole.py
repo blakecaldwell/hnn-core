@@ -138,6 +138,7 @@ def simulate_dipole(net, trial=0, verbose=True, extdata=None):
 
     #pc.barrier()  # get all nodes to this place before continuing
 
+    dpl = None
     if rank == 0:
         dpl_data = np.c_[np.array(dp_rec_L2.to_python()) +
                         np.array(dp_rec_L5.to_python()),
