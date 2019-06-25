@@ -13,17 +13,6 @@ def _hammfilt(x, winsz):
     win /= sum(win)
     return convolve(x, win, 'same')
 
-def get_index_at_time(dpl, t):
-    """Check that the time has an index and return it"""
-    import numpy as np
-
-    indices = np.where(dpl.t==t)[0]
-    if len(indices) < 1:
-        print("Error, invalid start time for dipole")
-        return
-
-    return indices[0]
-
 
 def initialize_sim(net):
     """
@@ -88,7 +77,6 @@ def simulate_dipole(net, trial=0, verbose=True, extdata=None):
 
     from neuron import h
     h.load_file("stdrun.hoc")
-
     t_vec, dp_rec_L2, dp_rec_L5 = initialize_sim(net)
 
     # make sure network state is consistent
@@ -100,9 +88,10 @@ def simulate_dipole(net, trial=0, verbose=True, extdata=None):
 
     # Now let's simulate the dipole
 
-    if verbose and rank == 0:
+    if verbose:
         pc.barrier()  # sync for output to screen
-        print("Running trial %d (on %d cores)" % (trial + 1, nhosts))
+        if rank == 0:
+            print("Running trial %d (on %d cores)" % (trial + 1, nhosts))
 
     # initialize cells to -65 mV, after all the NetCon
     # delays have been specified
@@ -354,13 +343,16 @@ class Dipole(object):
         from scipy import signal
 
         # make sure start and end times are valid for both dipoles
-        exp_start_index = get_index_at_time(exp_dpl, tstart)
-        exp_end_index = get_index_at_time(exp_dpl, tstop)
+        exp_start_index = (np.abs(exp_dpl.t - tstart)).argmin()
+        print('exp start', exp_dpl.t[exp_start_index])
+        exp_end_index = (np.abs(exp_dpl.t - tstop)).argmin()
         exp_length = exp_end_index - exp_start_index
+        print('exp end', exp_dpl.t[exp_end_index])
 
-        sim_start_index = get_index_at_time(self, tstart)
-        sim_end_index = get_index_at_time(self, tstop)
+        sim_start_index = (np.abs(self.t - tstart)).argmin()
+        sim_end_index = (np.abs(self.t - tstop)).argmin()
         sim_length = sim_end_index - sim_start_index
+        print('sim length', sim_length)
 
         dpl1 = self.dpl['agg'][sim_start_index:sim_end_index]
         dpl2 = exp_dpl.dpl['agg'][exp_start_index:exp_end_index]
