@@ -38,10 +38,6 @@ def initialize_sim(net):
     -------
     t_vec : Vector
           Vector that has been connected to time ref in NEURON
-    dp_rec_L2 : Vector
-          Vector that has been connected to L2 dipole ref in NEURON
-    dp_rec_L5 : Vector
-          Vector that has been connected to L5 dipole ref in NEURON
     """
 
     from neuron import h
@@ -57,12 +53,9 @@ def initialize_sim(net):
     #h("dp_total_L5 = 0.")
 
     # Connect NEURON scalar references to python vectors
-    t_vec = dp_rec_L2 = dp_rec_L5 = None
-    #t_vec = h.Vector(int(h.tstop / h.dt + 1)).record(h._ref_t)  # time recording
-    #dp_rec_L2 = h.Vector(int(h.tstop / h.dt + 1)).record(h._ref_dp_total_L2)  # L2 dipole recording
-    #dp_rec_L5 = h.Vector(int(h.tstop / h.dt + 1)).record(h._ref_dp_total_L5)  # L5 dipole recording
+    t_vec = h.Vector(int(h.tstop / h.dt + 1)).record(h._ref_t)  # time recording
 
-    return t_vec, dp_rec_L2, dp_rec_L5
+    return t_vec
 
 
 def simulate_dipole(net, trial=0, verbose=True, extdata=None):
@@ -90,7 +83,7 @@ def simulate_dipole(net, trial=0, verbose=True, extdata=None):
 
     from neuron import h
     h.load_file("stdrun.hoc")
-    t_vec, dp_rec_L2, dp_rec_L5 = initialize_sim(net)
+    t_vec = initialize_sim(net)
 
     # make sure network state is consistent
     net.state_init()
@@ -126,28 +119,25 @@ def simulate_dipole(net, trial=0, verbose=True, extdata=None):
     # actual simulation - run the solver
     pc.psolve(h.tstop)
 
-    dpl = None
-    pc.barrier()
-    return dpl
-
-    # these calls aggregate data across procs/nodes
-    pc.allreduce(dp_rec_L2, 1)
-    # combine dp_rec on every node, 1=add contributions together
-    pc.allreduce(dp_rec_L5, 1)
     # aggregate the currents independently on each proc
     net.aggregate_currents()
-    #pc.barrier()
-    # combine net.current{} variables on each proc
+    net.aggregate_dpls()
+    # get all nodes to this place before continuing
+    pc.barrier()
+
+    # these calls aggregate data across procs/nodes
+    # combine dp_rec on every node, 1=add contributions together
+    pc.allreduce(net.dpls['L5Pyr'], 1)
+    pc.allreduce(net.dpls['L2Pyr'], 1)
     pc.allreduce(net.current['L5Pyr_soma'], 1)
     pc.allreduce(net.current['L2Pyr_soma'], 1)
 
-    #pc.barrier()  # get all nodes to this place before continuing
-
+    dpl = None
     if rank == 0:
-        dpl_data = np.c_[np.array(dp_rec_L2.to_python()) +
-                        np.array(dp_rec_L5.to_python()),
-                        np.array(dp_rec_L2.to_python()),
-                        np.array(dp_rec_L5.to_python())]
+        dpl_data = np.c_[np.array(net.dpls['L2Pyr'].to_python()) +
+                        np.array(net.dpls['L5Pyr'].to_python()),
+                        np.array(net.dpls['L2Pyr'].to_python()),
+                        np.array(net.dpls['L5Pyr'].to_python())]
 
         dpl = Dipole(np.array(t_vec.to_python()), dpl_data)
 

@@ -46,6 +46,7 @@ class _Cell(object):
         self.ncfrom_extgauss = []
         self.ncfrom_extpois = []
         self.ncfrom_ev = []
+        self.dpls = []
 
     def __repr__(self):
         class_name = self.__class__.__name__
@@ -147,13 +148,29 @@ class _Cell(object):
                     self.parconnect_from_src(
                         gid_src, nc_dict, postsyn))
 
+
+    def _get_global_index_base(self, net_N_cells, net_max_segs_per_sec):
+        from .parallel import rank
+
+        var_per_seg = 2
+        var_per_sec = net_max_segs_per_sec * var_per_seg + 1
+        net_max_secs_per_gid = 9  # for L5
+
+        vars_per_gid = net_max_secs_per_gid * var_per_sec
+        stride = net_N_cells * vars_per_gid
+        base = rank * stride
+
+        index = base + self.gid * vars_per_gid
+        return index
+
+
     # two things need to happen here for h:
     # 1. dipole needs to be inserted into each section
     # 2. a list needs to be created with a Dipole (Point Process) in each
     #    section at position 1
     # In Cell() and not Pyr() for future possibilities.
     # However, only called from pyramidal cells and not basket cells
-    def _dipole_insert(self, N_cells, max_segs):
+    def _dipole_insert(self, net_N_cells, net_max_segs):
         from .parallel import pc, rank
 
         # insert dipole into each section of this cell
@@ -163,34 +180,26 @@ class _Cell(object):
         seclist.wholetree(sec=self.soma)
         # create a python section list list_all
         self.list_all = [sec for sec in seclist]
+
         for sect in self.list_all:
             sect.insert('dipole')
         # Dipole is defined in dipole_pp.mod
         self.dipole_pp = [h.Dipole(1, sec=sect) for sect in self.list_all]
         # setting pointers and ztan values
-        seg_index = 0
-        n_pointers = 4 # overkill
-        base = max_segs * N_cells * rank
+        var_index = self._get_global_index_base(net_N_cells,net_max_segs)
         for sect, dpp in zip(self.list_all, self.dipole_pp):
             # assign internal resistance values to dipole point process (dpp)
             dpp.ri = h.ri(1, sec=sect)
-            # sets pointers in dipole mod file to the correct locations
-            # h.setpointer(ref, ptr, obj)
+
             sect.push()
-            #print('rank %d, gid %d using gid_count %d'%(rank, self.gid, base + self.gid * max_segs + seg_index))
-            pc.source_var(sect(0.99)._ref_v, base + self.gid * max_segs + seg_index, sec=sect)
-            #if self.celltype.startswith('L2'):
-            #    pc.source_var(h._ref_dp_total_L2, base + self.gid * max_segs + seg_index, sec=sect)
+            pc.source_var(sect(0.99)._ref_v, var_index, sec=sect)
+            pc.target_var(dpp, dpp._ref_pv, var_index)
+            var_index = var_index + 1
+
+            self.dpls.append(h.Vector().record(dpp._ref_Qtotal))  # L2 dipole recording
             #    h.setpointer(h._ref_dp_total_L2, 'Qtotal', dpp)
-            #elif self.celltype.startswith('L5'):
-            #    pc.source_var(h._ref_dp_total_L5, base + self.gid * max_segs + seg_index, sec=sect)
             #    h.setpointer(h._ref_dp_total_L5, 'Qtotal', dpp)
-            #seg_index = seg_index + 1
-            h.pop_section()
-            pc.target_var(dpp, dpp._ref_pv, base + self.gid * max_segs + seg_index)
-            seg_index = seg_index + 1
-            #pc.target_var(dpp, dpp._ref_Qtotal, base + self.gid * max_segs + seg_index)
-            #h.setpointer(sect(0.99)._ref_v, 'pv', dpp)
+
             # gives INTERNAL segments of the section, non-endpoints
             # creating this because need multiple values simultaneously
             loc = np.array([seg.x for seg in sect])
@@ -203,6 +212,7 @@ class _Cell(object):
             # diff values calculate length between successive section points
             y_diff = np.diff(y_scale)
             # y_diff = np.diff(y_long)
+
             # doing range to index multiple values of the same
             # np.array simultaneously
             for i in range(len(loc)):
@@ -211,21 +221,24 @@ class _Cell(object):
                 # range variable 'dipole'
                 # set pointers to previous segment's voltage, with
                 # boundary condition
-                #print('rank %d, gid %d using gid_count %d'%(rank, self.gid, base + self.gid * max_segs + seg_index))
-                #sect.push()
                 if i:
-                    pc.source_var(sect(loc[i - 1])._ref_v, base + self.gid * max_segs + seg_index, sec=sect)
-                    pc.target_var(dpp, sect(loc[i]).dipole._ref_pv, base + self.gid * max_segs + seg_index)
+                    pc.source_var(sect(loc[i - 1])._ref_v, var_index, sec=sect)
+                    pc.target_var(dpp, sect(loc[i]).dipole._ref_pv, var_index)
                     #h.setpointer(sect(loc[i - 1])._ref_v,
                     #             'pv', sect(loc[i]).dipole)
                 else:
-                    pc.source_var(sect(0)._ref_v, base + self.gid * max_segs + seg_index, sec=sect)
-                    pc.target_var(dpp, sect(loc[i]).dipole._ref_pv, base + self.gid * max_segs + seg_index)
+                    pass
+                    # case i == 0 fails with target_var
+                    #pc.source_var(sect(0)._ref_v, var_index, sec=sect)
+                    #pc.target_var(dpp, sect(loc[i]).dipole._ref_pv2, var_index)
                     #h.setpointer(sect(0)._ref_v, 'pv', sect(loc[i]).dipole)
-                #h.pop_section()
-                seg_index = seg_index + 1
+                var_index = var_index + 1
+
                 ## set aggregate pointers
-                #h.setpointer(dpp._ref_Qsum, 'Qsum', sect(loc[i]).dipole)
+                pc.source_var(sect(loc[i]).dipole._ref_Qsum, var_index, sec=sect)
+                pc.target_var(dpp, dpp._ref_Qin, var_index)
+                var_index = var_index + 1
+                #h.setpointer(dpp._ref_Qin, 'Qsum', sect(loc[i]).dipole)
                 #if self.celltype.startswith('L2'):
                 #    h.setpointer(h._ref_dp_total_L2, 'Qtotal',
                 #                 sect(loc[i]).dipole)
@@ -235,6 +248,7 @@ class _Cell(object):
                 # add ztan values
                 sect(loc[i]).dipole.ztan = y_diff[i]
             # set the pp dipole's ztan value to the last value from y_diff
+            h.pop_section()
             dpp.ztan = y_diff[-1]
 
     # Add IClamp to a segment

@@ -32,7 +32,7 @@ from mpi4py import MPI
 import numpy as np
 
 # default is to loop once unless set in params
-max_loops = 100
+max_loops = 1
 
 # simulate truncating digits
 # modified from https://realpython.com/python-rounding/#truncation
@@ -67,7 +67,7 @@ except MPI.Exception:
         extdata.append(loadtxt('default_hnn_trial%d.txt' % i))
 
 #    verbose = True
-    verbose = True
+    verbose = False
 
 
 ###############################################################################
@@ -104,7 +104,6 @@ while loop < max_loops:
     for trial in range(ntrials):
         dpl = simulate_dipole(net, trial=trial,
                                       verbose=verbose)
-        continue
 
         if get_rank() == 0:
             data = np.c_[extdata[trial][:,1],
@@ -127,9 +126,9 @@ while loop < max_loops:
 #                            truncate(exp_dpl.dpl[cell_dipole][index], decimals)):
                     difference = abs(dpl.dpl[cell_dipole][index] - exp_dpl.dpl[cell_dipole][index])
                     if difference > max_threshold:
-                         print('new threshold = %.12f' % max_threshold)
+#                         print('new threshold = %.12f' % max_threshold)
                          max_threshold = difference
-#                        true_diffs.append(index)
+                         true_diffs.append(index)
 
                     if len(true_diffs) > 0:
                         print('ERROR: %s dipoles are not equal: %d Values differ' %

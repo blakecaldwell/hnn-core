@@ -50,16 +50,13 @@ class Pyr(_Cell):
 
     def create_dends(self, p_dend_props):
         for key in p_dend_props:
-            print('creating ' + self.name + '_' + key)
             self.dends[key] = h.Section(
                 name=self.name + '_' + key)  # create dend
         # apical: 0--4; basal: 5--7
-        print('setting list_dend')
         self.list_dend = [self.dends[key] for key in
                           ['apical_trunk', 'apical_oblique', 'apical_1',
                            'apical_2', 'apical_tuft', 'basal_1', 'basal_2',
                            'basal_3'] if key in self.dends]
-        print('leaving create_dends')
 
     def set_dend_props(self, p_dend_props):
         """"Iterate over keys in p_dend_props. Create dend for each key."""
@@ -204,7 +201,6 @@ class Pyr(_Cell):
     def _synapse_create(self, p_syn):
         """Creates synapses onto this cell."""
 
-        print('entering _synapse_create')
         # Somatic synapses
         self.synapses = {
             'soma_gabaa': self.syn_create(self.soma(0.5), p_syn['gabaa']),
@@ -235,10 +231,9 @@ class Pyr(_Cell):
         if self.name == 'L5Pyr':
             self.apicaltuft_gabaa = self.syn_create(
                 self.dends['apical_tuft'](0.5), p_syn['gabaa'])
-        print('leaving  _synapse_create')
 
-    def dipole_insert(self, N_cells, max_segs):
-        self._dipole_insert(N_cells, max_segs)
+    def dipole_insert(self, net_N_cells, net_max_segs):
+        self._dipole_insert(net_N_cells, net_max_segs)
 
 
 class L2Pyr(Pyr):
@@ -390,8 +385,7 @@ class L2Pyr(Pyr):
         self.soma.insert('km')
         self.soma.gbar_km = self.p_all['L2Pyr_soma_gbar_km']
 
-        # TODO why is 10 needed here? 1 doesnt work
-        self.N_segs = self.N_segs + 10 
+        self.N_segs = self.N_segs + 1
 
     def _biophys_dends(self):
         """Defining biophysics for dendrites."""
@@ -632,7 +626,6 @@ class L5Pyr(Pyr):
 
         # Geometry
         # dend Cm and dend Ra set using soma Cm and soma Ra
-        print('before create_dends')
         self.create_dends(p_dend)  # just creates the sections
         self.topol()  # sets the connectivity between sections
         # sets geom properties; adjusted after translation from
@@ -640,9 +633,7 @@ class L5Pyr(Pyr):
         self.geom(p_dend)
 
         # biophysics
-        print('before __biophys_soma')
         self.__biophys_soma()
-        print('before __biophys_dends')
         self.__biophys_dends()
 
         # Dictionary of length scales to calculate dipole without
@@ -650,18 +641,14 @@ class L5Pyr(Pyr):
         self.yscale = self.get_sectnames()
 
         # create synapses
-        print('before _synapse_create')
         self._synapse_create(p_syn)
-        print('after _synapse_create')
 
         # insert iclamp
         self.list_IClamp = []
 
         # run record current soma, defined in Cell()
 
-        print('before record_current_soma')
         self.record_current_soma()
-        print('after record_current_soma')
 
     def basic_shape(self):
         # THESE AND LENGHTHS MUST CHANGE TOGETHER!!!
@@ -760,7 +747,6 @@ class L5Pyr(Pyr):
 
         # Insert 'hh2' mechanism
         self.soma.insert('hh2')
-        print('hh2')
         self.soma.gkbar_hh2 = self.p_all['L5Pyr_soma_gkbar_hh2']
         self.soma.gnabar_hh2 = self.p_all['L5Pyr_soma_gnabar_hh2']
         self.soma.gl_hh2 = self.p_all['L5Pyr_soma_gl_hh2']
@@ -769,39 +755,32 @@ class L5Pyr(Pyr):
         # insert 'ca' mechanism
         # Units: pS/um^2
         self.soma.insert('ca')
-        print('ca')
         self.soma.gbar_ca = self.p_all['L5Pyr_soma_gbar_ca']
 
         # insert 'cad' mechanism
         # units of tau are ms
         self.soma.insert('cad')
-        print('cad')
         self.soma.taur_cad = self.p_all['L5Pyr_soma_taur_cad']
 
         # insert 'kca' mechanism
         # units are S/cm^2?
         self.soma.insert('kca')
-        print('kca')
         self.soma.gbar_kca = self.p_all['L5Pyr_soma_gbar_kca']
 
         # Insert 'km' mechanism
         # Units: pS/um^2
         self.soma.insert('km')
-        print('km')
         self.soma.gbar_km = self.p_all['L5Pyr_soma_gbar_km']
-
-        # insert 'ar' mechanism
-        self.soma.insert('ar')
-        print('ar')
-        self.soma.gbar_ar = self.p_all['L5Pyr_soma_gbar_ar']
 
         # insert 'cat' mechanism
         self.soma.insert('cat')
-        print('cat')
         self.soma.gbar_cat = self.p_all['L5Pyr_soma_gbar_cat']
 
-        # TODO why is 10 needed here? 1 doesnt work
-        self.N_segs = self.N_segs + 10
+        # insert 'ar' mechanism
+        self.soma.insert('ar')
+        self.soma.gbar_ar = self.p_all['L5Pyr_soma_gbar_ar']
+
+        self.N_segs = self.N_segs + 1
 
     def __biophys_dends(self):
         # set dend biophysics specified in Pyr()
