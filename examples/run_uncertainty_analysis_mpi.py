@@ -157,89 +157,65 @@ if rank == 0:
     exp_data = loadtxt(exp_fname)
     with open(params_fname) as json_data:
         params_input = load(json_data)
+
+    input_name = environ['INPUT_NAME']
+    include_weights = environ['INCLUDE_WEIGHTS']
+    params_input['sim_prefix'] = "%s_%s_%s" % (op.basename(params_fname).split('.json')[0], input_name, include_weights)
+
     simdata = (exp_data, params_input)
     print("Master has finished loading file data. Sending to the workers.")
 
     # broadcast simdata to all of the workers
     comm.bcast(simdata, root=0)
 
+    # TODO support multiple inputs
+    param_input_name = 't_%s' % input_name
+    input_times = { param_input_name: float(params_input[param_input_name]) }
+
+    timing_weight_bound = 5.00
+    timing_bound = float(params_input['tstop']) * 0.06
+    parameters = {}
+    for k,v in input_times.items():
+        input_name = k.split('t_', 1)[1]
+
+        if 'timing_only' in include_weights or 'timing_and_weights' in include_weights:
+            timing_min = max(0, v - timing_bound)
+            timing_max = min(float(params_input['tstop']), v + timing_bound)
+            print("Varying %s in range[%.4f-%.4f]" % (k, timing_min, timing_max))
+            parameters[k] = cp.Uniform(timing_min, timing_max)
+        if 'weights_only' in include_weights or 'timing_and_weights' in include_weights:
+            for weight in ['L2Pyr_ampa', 'L2Pyr_nmda',
+                           'L2Basket_ampa', 'L2Basket_nmda',
+                           'L5Pyr_ampa', 'L5Pyr_nmda',
+                           'L5Basket_ampa', 'L5Basket_nmda']:
+
+                timing_weight_name = "gbar_%s_%s"%(input_name, weight)
+                try:
+                    timing_weight_value = float(params_input[timing_weight_name])
+                    if timing_weight_value == 0.:
+                        weight_min = 0.
+                        weight_max = 1.
+                    else:
+                        weight_min = max(0, timing_weight_value - timing_weight_value * timing_weight_bound)
+                        weight_max = min(float(params_input['tstop']), timing_weight_value + timing_weight_value * timing_weight_bound)
+
+                    print("Varying %s in range[%.4f-%.4f]" % (timing_weight_name, weight_min, weight_max))
+                    parameters[timing_weight_name] = cp.Uniform(weight_min, weight_max)
+                except KeyError:
+                    pass
+
+
     def fun():
         pass
     # define the model to analyze
     model = un.Model(run=fun, labels=["time (ms)", "dipole (nAm)"])
-
-    if 'sim_prefix' in params_input:
-        model.name =  params_input['sim_prefix']
+    model.name =  params_input['sim_prefix']
 
     def rmse_output(time, dipole_output, info):
         return None, info["rmse_output"]
-    
-    # define some parameter distributions to sample from
-    t_evprox_1_dist = cp.Uniform(9,12)
-    t_evdist_1_dist = cp.Uniform(65,85)
-    t_evprox_2_dist = cp.Uniform(85,105)
-    sigma_t_evprox_1_dist = cp.Uniform(1,8)
-    #sigma_t_evprox_1_dist = cp.Uniform(1,15)
-    gbar_evprox_1_L2Pyr_ampa_dist = cp.Uniform(0,1)
-    gbar_evprox_1_L2Pyr_nmda_dist = cp.Uniform(0,1)
-    gbar_evprox_1_L5Pyr_ampa_dist = cp.Uniform(0,1)
-    gbar_evprox_1_L5Pyr_nmda_dist = cp.Uniform(0,1)
-    gbar_evprox_1_L2Basket_nmda_dist = cp.Uniform(0,1)
-    gbar_evprox_1_L2Basket_ampa_dist = cp.Uniform(0,1)
-    gbar_evprox_1_L5Basket_nmda_dist = cp.Uniform(0,1)
-    gbar_evprox_1_L5Basket_ampa_dist = cp.Uniform(0,1)
-    sigma_t_evdist_1_dist = cp.Uniform(1,15)
-    #sigma_t_evdist_1_dist = cp.Uniform(3.5,5)
-    gbar_evdist_1_L2Pyr_ampa_dist = cp.Uniform(0,5)
-    gbar_evdist_1_L2Pyr_nmda_dist = cp.Uniform(0.0,2)
-    gbar_evdist_1_L2Basket_ampa_dist = cp.Uniform(0,1)
-    gbar_evdist_1_L2Basket_nmda_dist = cp.Uniform(0.0,0.4)
-    gbar_evdist_1_L5Pyr_ampa_dist = cp.Uniform(0.,4)
-    gbar_evdist_1_L5Pyr_nmda_dist = cp.Uniform(0,5)
-    sigma_t_evprox_2_dist = cp.Uniform(1,15)
-    #sigma_t_evprox_2_dist = cp.Uniform(9,13)
-    gbar_evprox_2_L2Pyr_ampa_dist = cp.Uniform(0,100)
-    gbar_evprox_2_L2Pyr_nmda_dist = cp.Uniform(0,1)
-    gbar_evprox_2_L2Basket_ampa_dist = cp.Uniform(0.0,0.001)
-    gbar_evprox_2_L2Basket_nmda_dist = cp.Uniform(0,1)
-    gbar_evprox_2_L5Pyr_ampa_dist = cp.Uniform(0,100)
-    gbar_evprox_2_L5Pyr_nmda_dist = cp.Uniform(0,1)
-    gbar_evprox_2_L5Basket_ampa_dist = cp.Uniform(0.0,0.1)
-    gbar_evprox_2_L5Basket_nmda_dist = cp.Uniform(0,1)
-    
-    parameters = {
-    #    "sigma_t_evprox_1": sigma_t_evprox_1_dist,
-    #    "t_evprox_1": t_evprox_1_dist,
-    #    "gbar_evprox_1_L2Pyr_ampa": gbar_evprox_1_L2Pyr_ampa_dist,
-    #    "gbar_evprox_1_L2Pyr_nmda": gbar_evprox_1_L2Pyr_nmda_dist,
-    #    "gbar_evprox_1_L5Pyr_ampa": gbar_evprox_1_L5Pyr_ampa_dist,
-    #    "gbar_evprox_1_L5Pyr_nmda": gbar_evprox_1_L5Pyr_nmda_dist,
-    #    "gbar_evprox_1_L2Basket_ampa": gbar_evprox_1_L2Basket_ampa_dist,
-    #    "gbar_evprox_1_L2Basket_nmda": gbar_evprox_1_L2Basket_nmda_dist,
-    #    "gbar_evprox_1_L5Basket_ampa": gbar_evprox_1_L5Basket_ampa_dist,
-    #    "gbar_evprox_1_L5Basket_nmda": gbar_evprox_1_L5Basket_nmda_dist,
-    #    "sigma_t_evdist_1": sigma_t_evdist_1_dist,
-    #    "t_evdist_1": t_evdist_1_dist,
-    #    "gbar_evdist_1_L2Pyr_ampa": gbar_evdist_1_L2Pyr_ampa_dist,
-    #    "gbar_evdist_1_L2Pyr_nmda": gbar_evdist_1_L2Pyr_nmda_dist,
-    #    "gbar_evdist_1_L2Basket_ampa": gbar_evdist_1_L2Basket_ampa_dist,
-    #    "gbar_evdist_1_L2Basket_nmda": gbar_evdist_1_L2Basket_nmda_dist,
-    #    "gbar_evdist_1_L5Pyr_ampa": gbar_evdist_1_L5Pyr_ampa_dist,
-    #    "gbar_evdist_1_L5Pyr_nmda": gbar_evdist_1_L5Pyr_nmda_dist,
-        "sigma_t_evprox_2": sigma_t_evprox_2_dist,
-        "t_evprox_2": t_evprox_2_dist,
-        "gbar_evprox_2_L2Pyr_ampa": gbar_evprox_2_L2Pyr_ampa_dist,
-        "gbar_evprox_2_L2Basket_ampa": gbar_evprox_2_L2Basket_ampa_dist,
-        "gbar_evprox_2_L5Pyr_ampa": gbar_evprox_2_L5Pyr_ampa_dist,
-        "gbar_evprox_2_L5Basket_ampa": gbar_evprox_2_L5Basket_ampa_dist,
-        "gbar_evprox_2_L2Pyr_nmda": gbar_evprox_2_L2Pyr_nmda_dist,
-        "gbar_evprox_2_L2Basket_nmda": gbar_evprox_2_L2Basket_nmda_dist,
-        "gbar_evprox_2_L5Pyr_nmda": gbar_evprox_2_L5Pyr_nmda_dist,
-        "gbar_evprox_2_L5Basket_nmda": gbar_evprox_2_L5Basket_nmda_dist,
-    }
-    
+
     feature_list = [rmse_output]
-    
+
     if 'SLURM_NNODES' in environ:
         n_nodes = max(1, size - 1)
     else:
@@ -257,6 +233,6 @@ if rank == 0:
     #UQ.quantify(method="pc", seed=10, plot="all")
     #UQ.quantify(method="pc", rosenblatt=True, polynomial_order=7, seed=10, plot="all")
     print("Master starting sensitivity analysis on %d cores" % n_nodes)
-    UQ.quantify(method="mc", nr_samples=10000, rosenblatt=True, seed=10, plot="all")
+    UQ.quantify(method="mc", nr_samples=10000, rosenblatt=True, seed=10, plot="condensed_total")
     print("Master finished")
 

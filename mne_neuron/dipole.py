@@ -344,15 +344,18 @@ class Dipole(object):
 
         # make sure start and end times are valid for both dipoles
         exp_start_index = (np.abs(exp_dpl.t - tstart)).argmin()
-        print('exp start', exp_dpl.t[exp_start_index])
+        #print('exp start [%d]: %3.3f' % (exp_start_index, exp_dpl.t[exp_start_index]))
         exp_end_index = (np.abs(exp_dpl.t - tstop)).argmin()
+        #print('exp end [%d]: %3.3f' % (exp_end_index, exp_dpl.t[exp_end_index]))
         exp_length = exp_end_index - exp_start_index
-        print('exp end', exp_dpl.t[exp_end_index])
+        #print('exp length', exp_length)
 
         sim_start_index = (np.abs(self.t - tstart)).argmin()
+        #print('sim start: %3.3f [%d]' % (sim_start_index, self.t[sim_start_index]))
         sim_end_index = (np.abs(self.t - tstop)).argmin()
+        #print('sim end: %3.3f [%d]' % (sim_end_index, self.t[sim_end_index]))
         sim_length = sim_end_index - sim_start_index
-        print('sim length', sim_length)
+        #print('sim length', sim_length)
 
         dpl1 = self.dpl['agg'][sim_start_index:sim_end_index]
         dpl2 = exp_dpl.dpl['agg'][exp_start_index:exp_end_index]
