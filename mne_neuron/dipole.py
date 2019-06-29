@@ -14,7 +14,7 @@ def _hammfilt(x, winsz):
     return convolve(x, win, 'same')
 
 
-def initialize_sim(net):
+def initialize_sim(params):
     """
     Initialize NEURON simulation variables
 
@@ -36,9 +36,9 @@ def initialize_sim(net):
     h.load_file("stdrun.hoc")
 
     # Set tstop before instantiating any classes
-    h.tstop = net.params['tstop']
-    h.dt = net.params['dt']  # simulation duration and time-step
-    h.celsius = net.params['celsius']  # 37.0 - set temperature
+    h.tstop = params['tstop']
+    h.dt = params['dt']  # simulation duration and time-step
+    h.celsius = params['celsius']  # 37.0 - set temperature
 
     # create or reinitialize scalars in NEURON (hoc) context
     h("dp_total_L2 = 0.")
@@ -52,7 +52,7 @@ def initialize_sim(net):
     return t_vec, dp_rec_L2, dp_rec_L5
 
 
-def simulate_dipole(net, trial=0, verbose=True, extdata=None):
+def simulate_dipole(params, trial=0, verbose=True, extdata=None):
     """Simulate a dipole given the experiment parameters.
 
     Parameters
@@ -74,10 +74,15 @@ def simulate_dipole(net, trial=0, verbose=True, extdata=None):
         The dipole object
     """
     from .parallel import rank, nhosts, pc, cvode
+    from .network import Network
 
     from neuron import h
     h.load_file("stdrun.hoc")
-    t_vec, dp_rec_L2, dp_rec_L5 = initialize_sim(net)
+
+    # Build our Network 
+    net = Network(params)
+
+    t_vec, dp_rec_L2, dp_rec_L5 = initialize_sim(params)
 
     # make sure network state is consistent
     net.state_init()
@@ -145,6 +150,10 @@ def simulate_dipole(net, trial=0, verbose=True, extdata=None):
         dpl.convert_fAm_to_nAm()
         dpl.scale(net.params['dipole_scalefctr'])
         dpl.smooth(net.params['dipole_smooth_win'] / h.dt)
+
+    # reset the network
+    net.gid_clear()
+    del net
 
     return dpl
 
@@ -344,18 +353,12 @@ class Dipole(object):
 
         # make sure start and end times are valid for both dipoles
         exp_start_index = (np.abs(exp_dpl.t - tstart)).argmin()
-        #print('exp start [%d]: %3.3f' % (exp_start_index, exp_dpl.t[exp_start_index]))
         exp_end_index = (np.abs(exp_dpl.t - tstop)).argmin()
-        #print('exp end [%d]: %3.3f' % (exp_end_index, exp_dpl.t[exp_end_index]))
         exp_length = exp_end_index - exp_start_index
-        #print('exp length', exp_length)
 
         sim_start_index = (np.abs(self.t - tstart)).argmin()
-        #print('sim start: %3.3f [%d]' % (sim_start_index, self.t[sim_start_index]))
         sim_end_index = (np.abs(self.t - tstop)).argmin()
-        #print('sim end: %3.3f [%d]' % (sim_end_index, self.t[sim_end_index]))
         sim_length = sim_end_index - sim_start_index
-        #print('sim length', sim_length)
 
         dpl1 = self.dpl['agg'][sim_start_index:sim_end_index]
         dpl2 = exp_dpl.dpl['agg'][exp_start_index:exp_end_index]

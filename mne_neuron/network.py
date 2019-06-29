@@ -31,10 +31,6 @@ class Network(object):
     """
 
     def __init__(self, params, n_jobs=None):
-        from .parallel import create_parallel_context
-        # setup simulation (ParallelContext)
-        create_parallel_context(n_jobs=n_jobs)
-
         # set the params internally for this net
         # better than passing it around like ...
         self.params = params

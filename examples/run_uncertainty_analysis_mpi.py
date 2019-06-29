@@ -18,8 +18,6 @@ mpiexec -np 4 python examples/run_uncertainty_analysis.py
 #          Sam Neymotin <samnemo@gmail.com>
 
 from mpi4py import MPI
-import dill  
-MPI.pickle.__init__(dill.dumps, dill.loads)
 from os import environ
 import os.path as op
 
@@ -127,6 +125,49 @@ if rank != 0:
     #subcomm.Barrier()
 
 if rank == 0:
+
+    def set_parameters(include_weights, input_names):
+
+        timing_weight_bound = 5.00
+        timing_bound = float(params_input['tstop']) * 0.06
+        parameters = {}
+
+        for name in input_names:
+            param_input_name = 't_%s' % name
+            input_times = { param_input_name: float(params_input[param_input_name]) }
+
+            for k,v in input_times.items():
+                input_name = k.split('t_', 1)[1]
+
+                if 'timing_only' in include_weights or 'timing_and_weights' in include_weights:
+                    timing_min = max(0, v - timing_bound)
+                    timing_max = min(float(params_input['tstop']), v + timing_bound)
+                    print("Varying %s in range[%.4f-%.4f]" % (k, timing_min, timing_max))
+                    parameters[k] = cp.Uniform(timing_min, timing_max)
+                if 'weights_only' in include_weights or 'timing_and_weights' in include_weights:
+                    for weight in ['L2Pyr_ampa', 'L2Pyr_nmda',
+                                   'L2Basket_ampa', 'L2Basket_nmda',
+                                   'L5Pyr_ampa', 'L5Pyr_nmda',
+                                   'L5Basket_ampa', 'L5Basket_nmda']:
+
+                        timing_weight_name = "gbar_%s_%s"%(input_name, weight)
+                        try:
+                            timing_weight_value = float(params_input[timing_weight_name])
+                            if timing_weight_value == 0.:
+                                weight_min = 0.
+                                weight_max = 1.
+                            else:
+                                weight_min = max(0, timing_weight_value - timing_weight_value * timing_weight_bound)
+                                weight_max = min(float(params_input['tstop']), timing_weight_value + timing_weight_value * timing_weight_bound)
+
+                            print("Varying %s in range[%.4f-%.4f]" % (timing_weight_name, weight_min, weight_max))
+                            parameters[timing_weight_name] = cp.Uniform(weight_min, weight_max)
+                        except KeyError:
+                            pass
+
+        return parameters
+
+
     print("Master starting on %s" % name)
 
     import uncertainpy as un
@@ -158,51 +199,27 @@ if rank == 0:
     with open(params_fname) as json_data:
         params_input = load(json_data)
 
-    input_name = environ['INPUT_NAME']
+    input_names = []
+    input_name = ''
+    if 'INPUT_NAME_1' in environ:
+        input_names.append(environ['INPUT_NAME_1'])
+        input_name = input_name + '_' + environ['INPUT_NAME_1']
+    if 'INPUT_NAME_2' in environ:
+        input_names.append(environ['INPUT_NAME_2'])
+        input_name = input_name + '_' + environ['INPUT_NAME_2']
+    if 'INPUT_NAME_3' in environ:
+        input_names.append(environ['INPUT_NAME_3'])
+        input_name = input_name + '_' + environ['INPUT_NAME_3']
+
     include_weights = environ['INCLUDE_WEIGHTS']
-    params_input['sim_prefix'] = "%s_%s_%s" % (op.basename(params_fname).split('.json')[0], input_name, include_weights)
+    parameters =  set_parameters(include_weights, input_names)
+    params_input['sim_prefix'] = "%s%s_%s" % (op.basename(params_fname).split('.json')[0], input_name, include_weights)
 
     simdata = (exp_data, params_input)
     print("Master has finished loading file data. Sending to the workers.")
 
     # broadcast simdata to all of the workers
     comm.bcast(simdata, root=0)
-
-    # TODO support multiple inputs
-    param_input_name = 't_%s' % input_name
-    input_times = { param_input_name: float(params_input[param_input_name]) }
-
-    timing_weight_bound = 5.00
-    timing_bound = float(params_input['tstop']) * 0.06
-    parameters = {}
-    for k,v in input_times.items():
-        input_name = k.split('t_', 1)[1]
-
-        if 'timing_only' in include_weights or 'timing_and_weights' in include_weights:
-            timing_min = max(0, v - timing_bound)
-            timing_max = min(float(params_input['tstop']), v + timing_bound)
-            print("Varying %s in range[%.4f-%.4f]" % (k, timing_min, timing_max))
-            parameters[k] = cp.Uniform(timing_min, timing_max)
-        if 'weights_only' in include_weights or 'timing_and_weights' in include_weights:
-            for weight in ['L2Pyr_ampa', 'L2Pyr_nmda',
-                           'L2Basket_ampa', 'L2Basket_nmda',
-                           'L5Pyr_ampa', 'L5Pyr_nmda',
-                           'L5Basket_ampa', 'L5Basket_nmda']:
-
-                timing_weight_name = "gbar_%s_%s"%(input_name, weight)
-                try:
-                    timing_weight_value = float(params_input[timing_weight_name])
-                    if timing_weight_value == 0.:
-                        weight_min = 0.
-                        weight_max = 1.
-                    else:
-                        weight_min = max(0, timing_weight_value - timing_weight_value * timing_weight_bound)
-                        weight_max = min(float(params_input['tstop']), timing_weight_value + timing_weight_value * timing_weight_bound)
-
-                    print("Varying %s in range[%.4f-%.4f]" % (timing_weight_name, weight_min, weight_max))
-                    parameters[timing_weight_name] = cp.Uniform(weight_min, weight_max)
-                except KeyError:
-                    pass
 
 
     def fun():
@@ -220,7 +237,7 @@ if rank == 0:
         n_nodes = max(1, size - 1)
     else:
         n_nodes = 1
-    
+
     UQ = un.UncertaintyQuantification(
         model=model,
         parameters=parameters,
