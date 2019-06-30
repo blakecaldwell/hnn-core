@@ -32,7 +32,7 @@ from mpi4py import MPI
 import numpy as np
 import nlopt
 
-def split_by_evinput(params):
+def split_by_evinput(params, sd_range):
     import re
 
     chunks = {}
@@ -54,8 +54,8 @@ def split_by_evinput(params):
 
     # bound by 3 sigma
     for c in chunks.keys():
-        chunks[c]['start'] = max(0, chunks[c]['mean'] - 3 * chunks[c]['sigma'])
-        chunks[c]['end'] = min(float(params['tstop']), chunks[c]['mean'] + 3 * chunks[c]['sigma'])
+        chunks[c]['start'] = max(0, chunks[c]['mean'] - sd_range * chunks[c]['sigma'])
+        chunks[c]['end'] = min(float(params['tstop']), chunks[c]['mean'] + sd_range * chunks[c]['sigma'])
 
     sorted_chunks = sorted(chunks.items(), key=lambda x: x[1]['start'])
 
@@ -154,7 +154,6 @@ def run_remote_sim(new_params, grad=0):
     global subcomm
 
     optparams = params_input
-    time = params_input['opt_time']
     for k,v in zip(params_input['opt_params'].keys(), new_params):
         if v >= params_input['opt_params'][k]['minval'] and v <= params_input['opt_params'][k]['maxval']:
             optparams[k] = v
@@ -207,7 +206,7 @@ def get_dipole_error(new_params, grad=0):
 
     ###############################################################################
     # Split by input times
-    chunks = split_by_evinput(optparams)
+    chunks = split_by_evinput(optparams, 2)
 
     ###############################################################################
     # Now let's simulate the dipole
@@ -320,6 +319,8 @@ except MPI.Exception:
 
     verbose = True
 
+
+
 algorithm = None
 if 'ALGORITHM' in environ:
     if environ['ALGORITHM'] == "NLOPT_GN_DIRECT_L":
@@ -351,7 +352,7 @@ if 'ALGORITHM' in environ:
         print('must specify an algorithm with the ALGORITHM environment variable')
     else:
         print('using algorithm %s' %  environ['ALGORITHM'])
-    params_input['sim_prefix'] = 'ERPYesSupra_opt_%s' % environ['ALGORITHM']
+    params_input['sim_prefix'] = 'ERPYesSupra_opt_chunk_2_%s' % environ['ALGORITHM']
 
 
 input_names = []
@@ -366,12 +367,22 @@ if 'INPUT_NAME_3' in environ:
     input_names.append(environ['INPUT_NAME_3'])
     input_name = input_name + '_' + environ['INPUT_NAME_3']
 
+#verbose = False
+params_input['opt_time'] = 77.2998046875
+
+from math import ceil
+chunks = split_by_evinput(params_input, 2)
+for chunk in chunks:
+    if params_input['opt_time'] >= chunk['start'] and params_input['opt_time'] <= chunk['end']:
+        params_input['opt_start'] = chunk['start']
+        params_input['opt_end'] = chunk['end']
+        params_input['tstop'] = ceil(chunk['end'] / 10)*10
+        break
+
 include_weights = environ['INCLUDE_WEIGHTS']
 p = set_parameters(include_weights, input_names)
-
-#verbose = False
-params_input['opt_time'] = 0.
 params_input['opt_params'] = p
+
 
 def run_nlopt(algorithm):
     num_params = len(params_input['opt_params'])

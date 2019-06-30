@@ -21,7 +21,7 @@ from os import environ
 
 import mne_neuron
 from mne_neuron import simulate_dipole, average_dipoles, Dipole, Params, Network
-from mne_neuron import get_rank, shutdown, create_parallel_context
+from mne_neuron import get_rank, shutdown
 
 mne_neuron_root = op.join(op.dirname(mne_neuron.__file__), '..')
 
@@ -55,14 +55,6 @@ except MPI.Exception:
     verbose = True
     loop = False
 
-###############################################################################
-# Get number of trials
-try:
-    ntrials = base_params['N_trials']
-except KeyError:
-    ntrials = 1
-
-pc = create_parallel_context(n_jobs=ntrials)
 avg_sim_times = []
 while True:
     # to make sure we don't have stale params, use the line below
@@ -82,31 +74,36 @@ while True:
         for key, value in new_params.items():
             params[key] = value
 
+    ###############################################################################
+    # Build our Network and set up parallel simulation
+
+    net = Network(params)
+
     if not 'tstart' in params:
         params['tstart'] = 0
 
+    ###############################################################################
+    # Get number of trials
+
+    try:
+        ntrials = net.params['N_trials']
+    except KeyError:
+        ntrials = 1
+
+    if verbose and get_rank() == 0:
+        print("Running %d trials" % ntrials)
 
     ###############################################################################
     # Now let's simulate the dipole
 
     # Start clock
-    if get_rank() == 0:
-        start = MPI.Wtime()
+    start = MPI.Wtime()
 
     dpls = [None]*ntrials
     errs = np.zeros(ntrials)
     for trial in range(ntrials):
-        # send a trial to the bulletin board
-        pc.submit(simulate_dipole, params, trial, verbose)
-
-    completed = 0
-    while completed < ntrials:
-        # get results from completed trials
-        pc.working()
-        params = pc.upkpyobj()
-        userid = int(pc.upkscalar())
-        dpls[userid-1] = pc.pyret()
-        completed = completed + 1
+        dpls[trial] = simulate_dipole(net, trial=trial,
+                                      verbose=verbose)
 
     if get_rank() == 0:
         # calculate RMSE
@@ -118,6 +115,11 @@ while True:
         exp_dpl = Dipole(extdata[:,0], np.c_[extdata[:,1]], data_cols=1)
         avg_rmse = avg_dpl.rmse(exp_dpl, params['tstart'], params['tstop'])
         params['avg_RMSE'] =  avg_rmse
+        if 'opt_start' in params and 'opt_end' in params:
+            chunk_rmse = avg_dpl.rmse(exp_dpl, params['opt_start'], params['opt_end'])
+            if verbose:
+                print("[%3.2f - %3.2f] RMSE is %.8f" % (params['opt_start'], params['opt_end'], chunk_rmse))
+            params['avg_RMSE'] =  chunk_rmse
 
         if loop:
             # send results back to parent
@@ -129,11 +131,15 @@ while True:
             params.write(unique=False)
 
         if verbose:
-            print("Avg. RMSE:", params['avg_RMSE'])
+            print("Avg. RMSE:", avg_rmse)
 
         finish = MPI.Wtime() - start
         avg_sim_times.append(finish)
         print('took %.2fs for simulation (avg=%.2fs)' % (finish, mean(avg_sim_times)))
+
+    # reset the network
+    net.gid_clear()
+    del net
 
     if not loop:
         break
