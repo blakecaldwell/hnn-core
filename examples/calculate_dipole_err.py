@@ -123,8 +123,12 @@ while True:
 
         if loop:
             # send results back to parent
+            if 'task_index' in params:
+                task_index = params['task_index']
+            else:
+                task_index = 0
             data = np.array([np.array(avg_dpl.dpl['agg']).T,
-                            [params['avg_RMSE'], params['tstop']]])
+                            [params['avg_RMSE'], params['tstop'], task_index]])
             comm.send(data, dest=0)
 
             # write params to file with RMSE
