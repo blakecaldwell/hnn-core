@@ -95,7 +95,7 @@ class Batch(object):
         self.seed = seed
         if params:
             for k,v in params.items():
-                self.params.append({'label': k, 'inital': v['initial'],
+                self.params.append({'label': k, 'initial': v['initial'],
                                     'lower_bound': v['minval'],
                                     'upper_bound': v['maxval']})
         if groupedParams:
@@ -165,7 +165,7 @@ class Batch(object):
             import signal
             global ngen
             ngen += 1
-            
+
             # paths to required scripts
             genFolderPath = self.saveFolder + '/gen_' + str(ngen)
 
@@ -193,11 +193,13 @@ class Batch(object):
                 if tag == tags.READY:
                     # Worker is ready, so send it a task
                     if candidate_index < total_jobs:
+                        params_data = {}
                         for label, value in zip(paramLabels, candidates[candidate_index]):
-                            print('set %s=%s' % (label, value))
+                            params_data[label] = value
+                            #print('set %s=%s' % (label, value))
                         # add the task_index to params for writing to disk
-                        candidates[candidate_index]['task_index'] = candidate_index
-                        comm.send(candidates[candidate_index], dest=source, tag=tags.START)
+                        params_data['task_index'] = candidate_index
+                        comm.send(params_data, dest=source, tag=tags.START)
                         print("Sending task %d to worker %d" % (candidate_index, source))
                         candidate_index += 1
                     else:
@@ -211,6 +213,9 @@ class Batch(object):
                     jobs_completed += 1
                     print('  Candidate %d fitness = %.1f' % (finished_candidate, fitness[finished_candidate]))
 
+            # prepare for the next round by signalling holding workers
+            comm.bcast(None, root=0)
+
 
             print("-"*80)
             print("  Completed a generation  ")
@@ -223,8 +228,8 @@ class Batch(object):
         # -------------------------------------------------------------------------------
         def generator(random, args):
             # generate initial values for candidates
-            return args.get('initial')
-            #return [random.uniform(l, u) for l, u in zip(args.get('lower_bound'), args.get('upper_bound'))]
+            #return args.get('initial')
+            return [random.uniform(l, u) for l, u in zip(args.get('lower_bound'), args.get('upper_bound'))]
         # -------------------------------------------------------------------------------
         # Mutator
         # -------------------------------------------------------------------------------
@@ -285,6 +290,7 @@ class Batch(object):
         kwargs = {'cfg': self.cfg}
         kwargs['num_inputs'] = len(self.params)
         kwargs['paramLabels'] = [x['label'] for x in self.params]
+        kwargs['initial'] = [x['initial'] for x in self.params]
         kwargs['lower_bound'] = [x['lower_bound'] for x in self.params]
         kwargs['upper_bound'] = [x['upper_bound'] for x in self.params]
         kwargs['statistics_file'] = stats_file
@@ -370,7 +376,7 @@ class Batch(object):
         num_workers = kwargs['nodes']
 
         for worker in range(1,num_workers):
-            comm.isend(None, dest=worker, tag=tags.EXIT)
+            comm.send(None, dest=worker, tag=tags.EXIT)
 
         closed_workers = 0
         while closed_workers < num_workers:
@@ -379,4 +385,4 @@ class Batch(object):
             closed_workers += 1
             print("Worker %d exiting (%d running)" % (source, num_workers - closed_workers))
        
-        sys.exit()
+        #sys.exit()

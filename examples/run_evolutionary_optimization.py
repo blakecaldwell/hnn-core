@@ -44,7 +44,7 @@ if rank != 0:
     print("Worker started with rank %d on %s." % (rank, name))
 
     # receive experimental data
-    (exp_data, params_input) = comm.bcast(comm.Get_rank(), root=0)
+    (exp_data, params_input) = comm.bcast(rank, root=0)
 
     # number of processes to run nrniv with
     if 'SLURM_CPUS_ON_NODE' in environ:
@@ -72,12 +72,13 @@ if rank != 0:
 
     #subcomm.Barrier()
     print("Worker %d waiting on master to signal start" % rank)
-    # tell rank 0 we are ready
-    comm.isend(None, dest=0, tag=tags.READY)
 
     while True:
         # Start clock
         #start = MPI.Wtime()
+
+        # tell rank 0 we are ready
+        comm.isend(None, dest=0, tag=tags.READY)
 
         # Receive updated params (blocking)
         new_params = comm.recv(source=0, tag=MPI.ANY_TAG, status=status)
@@ -88,6 +89,8 @@ if rank != 0:
             break
         elif tag == tags.HOLD:
             print('worker %d on %s has received hold signal'%(rank, name))
+            # wait for this round to complete
+            comm.bcast(rank, root=0)
             continue
 
         #assert(tag == tags.START)
@@ -114,9 +117,6 @@ if rank != 0:
         # send results back
         comm.isend(temp_results, dest=0, tag=tags.DONE)
 
-        # tell rank 0 we are ready (again)
-        comm.isend(None, dest=0, tag=tags.READY)
-
     # tell rank 0 we are closing
     comm.send(None, dest=0, tag=tags.EXIT)
 
@@ -132,7 +132,7 @@ if rank == 0:
     from time import sleep
     from numpy import loadtxt
     from json import load
-    from mne_neuron import Batch
+    from batch import Batch
 
     print("Master started")
 
@@ -217,7 +217,7 @@ if rank == 0:
 
     include_weights = environ['INCLUDE_WEIGHTS']
     opt_parameters =  set_parameters(include_weights, input_names)
-    params_input['sim_prefix'] = "%s%s_%s" % (op.basename(params_fname).split('.json')[0], input_name, include_weights)
+    params_input['sim_prefix'] = "%s_evol%s_%s" % (op.basename(params_fname).split('.json')[0], input_name, include_weights)
 
     simdata = (exp_data, params_input)
     print("Master has finished loading file data. Sending to the workers.")
@@ -240,19 +240,20 @@ if rank == 0:
         'script': 'examples/calculate_dipole_err.py',
         # options required only for hpc
         'mpiCommand': 'mpirun',  
-        'nodes': 1,
+        'nodes': n_nodes,
         'coresPerNode': 2,
-        'folder': '/Users/blake/repos/mne-neuron-new/evol'
+        'folder': '$HOME/mne-neuron/data/evol'
         #'custom': 'export LD_LIBRARY_PATH="$HOME/.openmpi/lib"' # only for conda users
     }
     b.evolCfg = {
         'evolAlgorithm': 'custom',
-        'pop_size': n_nodes * 4,
-        'num_elites': 1, # keep this number of parents for next generation if they are fitter than children
-        'mutation_rate': 0.4,
-        'crossover': 0.5,
+        'pop_size': n_nodes * 20,
+        'num_elites': 5, # keep this number of parents for next generation if they are fitter than children
+        'mutation_rate': 0.1,
+        'crossover': 0.1,
+        'tournament_size': 20,
         'maximize': False, # maximize fitness function?
-        'max_generations': 4,
+        'max_generations': 50,
         'time_sleep': 5, # wait this time before checking again if sim is completed (for each generation)
         'maxiter_wait': 40, # max number of times to check if sim is completed (for each generation)
         'defaultFitness': 1000 # set fitness value in case simulation time is over
