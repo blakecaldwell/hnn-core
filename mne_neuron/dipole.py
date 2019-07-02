@@ -74,6 +74,7 @@ def simulate_dipole(net, trial=0, verbose=True, extdata=None):
         The dipole object
     """
     from .parallel import rank, nhosts, pc, cvode
+    from os import path
 
     from neuron import h
     h.load_file("stdrun.hoc")
@@ -136,10 +137,14 @@ def simulate_dipole(net, trial=0, verbose=True, extdata=None):
 
         dpl = Dipole(np.array(t_vec.to_python()), dpl_data)
 
-    err = 0
-    if rank == 0:
         if net.params['save_dpl']:
-            dpl.write('rawdpl_%d.txt' % trial)
+            if 'task_id' in net.params:
+                idstr = '%d_%d' % (net.params['task_id'], trial)
+            else:
+                idstr = '%d' % (trial)
+            fname = path.join('data', net.params['sim_prefix'], 'dipoles',
+                              'rawdpl_%s.json' % idstr)
+            dpl.write(fname)
 
         dpl.baseline_renormalize(net.params)
         dpl.convert_fAm_to_nAm()
@@ -332,6 +337,10 @@ class Dipole(object):
         fname : str
             Full path to the output file (.txt)
         """
+        from os import makedirs, path
+
+        makedirs(path.dirname(fname), exist_ok=True)
+
         cols = [self.dpl.get(key) for key in ['agg', 'L2', 'L5'] if (key in self.dpl)]
         X = np.r_[[self.t] + cols].T
         np.savetxt(fname, X, fmt=['%3.3f', '%5.4f', '%5.4f', '%5.4f'],

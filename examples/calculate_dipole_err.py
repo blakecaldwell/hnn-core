@@ -86,7 +86,7 @@ while True:
     # Get number of trials
 
     try:
-        ntrials = net.params['N_trials']
+        ntrials = params['N_trials']
     except KeyError:
         ntrials = 1
 
@@ -120,6 +120,8 @@ while True:
             if verbose:
                 print("[%3.2f - %3.2f] RMSE is %.8f" % (params['opt_start'], params['opt_end'], chunk_rmse))
             params['avg_RMSE'] =  chunk_rmse
+        elif verbose:
+            print("[%3.2f - %3.2f] Total RMSE is %.8f" % (params['tstart'], params['tstop'], avg_rmse))
 
         if loop:
             # send results back to parent

@@ -34,6 +34,7 @@ class Params(dict):
     """
 
     def __init__(self, params_fname=None):
+        self.params_fname = params_fname
         if params_fname:
             with open(params_fname) as json_data:
                 params_input = json.load(json_data)
@@ -54,7 +55,7 @@ class Params(dict):
             self[key] = params[key]
 
         if not 'sim_prefix' in self.keys():
-            self['sim_prefix'] = op.basename(params_fname)
+            self['sim_prefix'] = op.basename(self.params_fname)
 
     def __repr__(self):
         """Display the params nicely."""
