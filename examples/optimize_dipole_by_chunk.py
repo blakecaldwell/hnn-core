@@ -222,15 +222,15 @@ def run_remote_sim(new_params, grad=0):
 
     dpl = Dipole(times, np.c_[temp_results[0]], data_cols=1)
 
-    wrmse = weighted_rmse(dpl, params_input['opt_start'], params_input['opt_end'])
-    print("Weighted RMSE:", wrmse)
-
     rmse = temp_results[1][0]
     #subcomm.Recv(temp_results, source=MPI.ANY_SOURCE)
 
     print("Avg. RMSE:", rmse)
-    return wrmse
+    if len(params_input['opt_inputs']) == 1:
+        rmse = weighted_rmse(dpl, params_input['opt_start'], params_input['opt_end'])
+        print("Weighted RMSE:", rmse)
 
+    return rmse
 
 def get_dipole_error(new_params, grad=0):
     global exp_data
@@ -310,7 +310,7 @@ def get_dipole_error(new_params, grad=0):
 
     return rmse
 
-def set_parameters(include_weights, input_names):
+def set_parameters(include_weights):
     global params_input
 
     timing_weight_bound = 5.0
@@ -318,7 +318,7 @@ def set_parameters(include_weights, input_names):
     timing_bound = float(params_input['tstop']) * 0.06
     parameters = {}
 
-    for name in input_names:
+    for name in params_input['opt_inputs']:
         param_input_name = 't_%s' % name
         mu = float(params_input[param_input_name])
         input_name = param_input_name.split('t_', 1)[1]
@@ -502,8 +502,8 @@ for index, chunk in enumerate(chunks):
     current_weight[indices] = 0
 
     # use the weight to define start and stop points for the optimization
-    params_input['opt_start'] = times[np.where(current_weight > 0.01)][0]
-    params_input['opt_end'] = times[np.where(current_weight > 0.01)][-1]
+    params_input['opt_start'] = times[np.where(current_weight > 0.1)][0]
+    params_input['opt_end'] = times[np.where(current_weight > 0.1)][-1]
 
     # convert to multiples of dt
     params_input['opt_start'] = floor(params_input['opt_start']/params_input['dt'])*params_input['dt']
@@ -514,7 +514,8 @@ for index, chunk in enumerate(chunks):
     params_input['tstop'] = params_input['opt_end']
 
     # fill out the rest of the param ranges (uses tstop)
-    params_input['opt_params'] = set_parameters(include_weights, chunk['inputs'])
+    params_input['opt_inputs'] = chunk['inputs']
+    params_input['opt_params'] = set_parameters(include_weights)
 
     print('optimizing from [%3.3f-%3.3f]' % (params_input['opt_start'], params_input['opt_end']))
     num_params = len(params_input['opt_params'])
@@ -542,7 +543,9 @@ params_input['sim_prefix'] = \
                       environ['ALGORITHM'])
 params_input['opt_start'] = 0.0
 params_input['opt_end'] = params_input['tstop'] = chunks[-1]['end']
-params_input['opt_params'] = set_parameters(include_weights, all_inputs)
+params_input['opt_inputs'] = all_inputs
+params_input['opt_params'] = set_parameters(include_weights)
+
 print('optimizing from [%3.3f-%3.3f]' % (params_input['opt_start'], params_input['opt_end']))
 num_params = len(params_input['opt_params'])
 opt = nlopt.opt(algorithm, num_params)
@@ -580,3 +583,5 @@ params_input.write(unique=False)
 
 # send empty new_params to stop nrniv procs
 subcomm.bcast(None, root=MPI.ROOT)
+
+shutdown()
