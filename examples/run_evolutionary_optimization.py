@@ -247,13 +247,13 @@ if rank == 0:
     }
     b.evolCfg = {
         'evolAlgorithm': 'custom',
-        'pop_size': n_nodes * 20,
-        'num_elites': 5, # keep this number of parents for next generation if they are fitter than children
-        'mutation_rate': 0.1,
-        'crossover': 0.1,
+        'pop_size': n_nodes * 40,
+        'num_elites': 10, # keep this number of parents for next generation if they are fitter than children
+        'mutation_rate': 0.3,
+        'crossover': 0.5,
         'tournament_size': 20,
         'maximize': False, # maximize fitness function?
-        'max_generations': 50,
+        'max_generations': 60,
         'time_sleep': 5, # wait this time before checking again if sim is completed (for each generation)
         'maxiter_wait': 40, # max number of times to check if sim is completed (for each generation)
         'defaultFitness': 1000 # set fitness value in case simulation time is over

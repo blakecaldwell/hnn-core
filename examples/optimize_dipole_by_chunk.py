@@ -191,6 +191,8 @@ def weighted_rmse(dpl, tstart, tstop):
         # downsample simulation timeseries to match exp data
         dpl1 = signal.resample(dpl1, exp_length)
         weight = signal.resample(weight, exp_length)
+        indices = np.where(weight < 1e-4)
+        weight[indices] = 0
     elif (sim_length < exp_length):
         # downsample exp timeseries to match simulation data
         dpl2 = signal.resample(dpl2, sim_length)
@@ -476,15 +478,23 @@ all_inputs = []
 for chunk in chunks:
     all_inputs = list(set(chunk['inputs'] + all_inputs))
 
+
+custom='_local_long'
+cumulative_rmse = 1e9
+weights = [None]*3
+weights[0] = np.zeros(num_step)
 for index, chunk in enumerate(chunks):
+    if index > 0:
+        weights[index] = weights[index-1].copy()
+
     inputs_to_opt_str = '_'.join(chunk['inputs'])
     params_input['sim_prefix'] = \
-        "%s_chunk_%d_%s_%s_%s" % (
+        "%s_chunk_%d_%s_%s_%s%s" % (
                                  op.basename(params_fname).split('.json')[0],
                                  index, inputs_to_opt_str, include_weights,
-                                 environ['ALGORITHM'])
+                                 environ['ALGORITHM'], custom)
 
-    current_weight = chunk['cdf'].copy()
+    weights[index] = chunk['cdf'].copy()
 
     for other_chunk in chunks:
         if other_chunk['inputs'][0] == chunk['inputs'][0]:
@@ -494,16 +504,17 @@ for index, chunk in enumerate(chunks):
             # check ordering to only use inputs after us
             continue
         else:
-            current_weight -= other_chunk['cdf']
+            decay_factor = 6*(params_input["t_%s"%other_chunk['inputs'][0]] - \
+                              params_input["t_%s"%chunk['inputs'][0]]) / \
+                              times[-1]
+            weights[index] -= other_chunk['cdf']/decay_factor
 
-    current_weight = np.clip(current_weight, a_min=0, a_max=1)
-    # get rid of very small numbers for sqrt calculation to succeed
-    indices = np.where(current_weight < 1e-4)
-    current_weight[indices] = 0
+    weights[index] = np.clip(weights[index], a_min=0, a_max=None)
+    current_weight = weights[index]
 
     # use the weight to define start and stop points for the optimization
-    params_input['opt_start'] = times[np.where(current_weight > 0.1)][0]
-    params_input['opt_end'] = times[np.where(current_weight > 0.1)][-1]
+    params_input['opt_start'] = times[np.where(weights[index] > 0.01)][0]
+    params_input['opt_end'] = times[np.where(weights[index] > 0.01)][-1]
 
     # convert to multiples of dt
     params_input['opt_start'] = floor(params_input['opt_start']/params_input['dt'])*params_input['dt']
@@ -511,7 +522,7 @@ for index, chunk in enumerate(chunks):
 
     # stop the simulation early if possible
     params_input['tstart'] = max(0,params_input['opt_start'])
-    params_input['tstop'] = params_input['opt_end']
+    params_input['tstop'] = ceil(params_input['opt_end'])
 
     # fill out the rest of the param ranges (uses tstop)
     params_input['opt_inputs'] = chunk['inputs']
@@ -520,27 +531,40 @@ for index, chunk in enumerate(chunks):
     print('optimizing from [%3.3f-%3.3f]' % (params_input['opt_start'], params_input['opt_end']))
     num_params = len(params_input['opt_params'])
     opt = nlopt.opt(algorithm, num_params)
-    opt_results = optimize(params_input, 50)
+    opt_results = optimize(params_input, 200)
 
+    old_params = {}
     # update params
     for var_name, value in zip(params_input['opt_params'].keys(), opt_results):
+        old_params[var_name] = params_input[var_name]
         params_input[var_name] = value
 
-    # update prefix for purposes of writing
-    params_input['sim_prefix'] = \
-        "%s_best_%s_%s_%s" % (
-                                 op.basename(params_fname).split('.json')[0],
-                                 inputs_to_opt_str, include_weights, environ['ALGORITHM'])
-    params_input['task_index'] = index
-    # write params to file with task_index representing the chunk
-    params_input.write(unique=False)
+    print("running a sim with best values to verify improved RMSE")
+
+    # so that params get written to a new file
+    params_input['task_index'] = int(params_input['task_index']) + 1
+
+    # approximate regular rmse for cumulative time
+    current_weight = np.ones(num_step)
+    params_input['opt_start'] = 0.0
+    params_input['opt_end'] = params_input['tstop']
+    opt_params = np.zeros(num_params)
+    for idx, param_name in enumerate(params_input['opt_params'].keys()):
+        opt_params[idx] = params_input[param_name]
+    new_rmse = run_remote_sim(opt_params)
+    if (new_rmse > cumulative_rmse):
+        print("REVERTING to params from %s" % chunks[index-1]['inputs'][0])
+        for var_name in old_params.keys():
+            params_input[var_name] = old_params[var_name]
+    else:
+        cumulative_rmse = cumulative_rmse
 
 # last optimization
 params_input['sim_prefix'] = \
-    "%s_all_%s_%s_%s" % (
+    "%s_all_%s_%s_%s%s" % (
                       op.basename(params_fname).split('.json')[0],
                       inputs_to_opt_str, include_weights,
-                      environ['ALGORITHM'])
+                      environ['ALGORITHM'], custom)
 params_input['opt_start'] = 0.0
 params_input['opt_end'] = params_input['tstop'] = chunks[-1]['end']
 params_input['opt_inputs'] = all_inputs
@@ -549,18 +573,15 @@ params_input['opt_params'] = set_parameters(include_weights)
 print('optimizing from [%3.3f-%3.3f]' % (params_input['opt_start'], params_input['opt_end']))
 num_params = len(params_input['opt_params'])
 opt = nlopt.opt(algorithm, num_params)
-opt_results = optimize(params_input, 100)
+opt_results = optimize(params_input, 1000)
 
 # update params
 for var_name, value in zip(params_input['opt_params'].keys(), opt_results):
     params_input[var_name] = value
 
-params_input['sim_prefix'] = \
-    "%s_best_%s_%s_%s" % (
-                                op.basename(params_fname).split('.json')[0],
-                                inputs_to_opt_str, include_weights,
-                                environ['ALGORITHM'])
-params_input['task_index'] = index + 1
+# so that params get written to a new file
+params_input['task_index'] = int(params_input['task_index']) + 1
+
 # write params to file with task_index representing the chunk
 params_input.write(unique=False)
 
@@ -583,5 +604,3 @@ params_input.write(unique=False)
 
 # send empty new_params to stop nrniv procs
 subcomm.bcast(None, root=MPI.ROOT)
-
-shutdown()
