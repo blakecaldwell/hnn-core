@@ -369,4 +369,4 @@ class Dipole(object):
             # downsample exp timeseries to match simulation data
             dpl2 = signal.resample(dpl2, sim_length)
 
-        return sqrt(((dpl1 - dpl2) ** 2).mean())
+        return np.sqrt(((dpl1 - dpl2) ** 2).mean())

@@ -197,7 +197,7 @@ def weighted_rmse(dpl, tstart, tstop):
         # downsample exp timeseries to match simulation data
         dpl2 = signal.resample(dpl2, sim_length)
 
-    return sqrt(weight * ((dpl1 - dpl2) ** 2)).mean()
+    return np.sqrt((weight * ((dpl1 - dpl2) ** 2)).sum()/weight.sum())
 
 
 def run_remote_sim(new_params, grad=0):
@@ -509,7 +509,7 @@ for index, chunk in enumerate(chunks):
                               times[-1]
             weights[index] -= other_chunk['cdf']/decay_factor
 
-    weights[index] = np.clip(weights[index], a_min=0, a_max=None)
+    weights[index] = np.clip(weights[index], a_min=0, a_max=None)/weights[index].mean()
     current_weight = weights[index]
 
     # use the weight to define start and stop points for the optimization
