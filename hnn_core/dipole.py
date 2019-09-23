@@ -35,10 +35,12 @@ def _simulate_single_trial(net):
     h.load_file("stdrun.hoc")
 
     # Now let's simulate the dipole
+
+    pc.barrier()  # sync for output to screen
     if rank == 0:
         print("running on %d cores" % nhosts)
 
-    # global variables, should be node-independent
+    # create or reinitialize scalars in NEURON (hoc) context
     h("dp_total_L2 = 0.")
     h("dp_total_L5 = 0.")
 
@@ -70,8 +72,10 @@ def _simulate_single_trial(net):
             cvode.event(tt, simulation_time)
 
     h.fcurrent()
-    # set state variables if they have been changed since h.finitialize
-    h.frecord_init()
+
+    # initialization complete, but wait for all procs to start the solver
+    pc.barrier()
+
     # actual simulation - run the solver
     pc.psolve(h.tstop)
 
@@ -94,8 +98,6 @@ def _simulate_single_trial(net):
                      np.array(dp_rec_L2.to_python()),
                      np.array(dp_rec_L5.to_python())]
 
-    pc.gid_clear()
-    pc.done()
     dpl = Dipole(np.array(t_vec.to_python()), dpl_data)
     if rank == 0:
         if net.params['save_dpl']:
@@ -126,9 +128,26 @@ def simulate_dipole(net, n_trials=1, n_jobs=1):
     dpl: list | instance of Dipole
         The dipole object or list of dipole objects if n_trials > 1
     """
-    parallel, myfunc = _parallel_func(_clone_and_simulate, n_jobs=n_jobs)
-    out = parallel(myfunc(net.params, idx) for idx in range(n_trials))
-    dpl, spiketimes, spikegids = zip(*out)
+
+    from .parallel import create_parallel_context, get_nhosts
+
+    if n_jobs > 1:
+        # check whether NEURON is using parallel nrniv processes
+        create_parallel_context(n_cores=1)
+        if get_nhosts() > 1:
+            raise ValueError("Nested parallelism is not currently supported!\n" +
+                  "Please choose embarassinly parallel jobs (n_jobs > 1)\n" +
+                  "or multiple cores per simulation (with MPI)\n")
+
+        parallel, myfunc = _parallel_func(_clone_and_simulate, n_jobs=n_jobs)
+        out = parallel(myfunc(net.params, idx) for idx in range(n_trials))
+        dpl, spiketimes, spikegids = zip(*out)
+    else:
+        out = []
+        for idx in range(n_trials):
+            out.append(_simulate_with_parallel_context(net, idx))
+        dpl, spiketimes, spikegids = zip(*out)
+
     net.spiketimes = spiketimes
     net.spikegids = spikegids
     return dpl

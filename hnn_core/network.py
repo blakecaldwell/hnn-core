@@ -2,11 +2,10 @@
 
 # Authors: Mainak Jas <mainak.jas@telecom-paristech.fr>
 #          Sam Neymotin <samnemo@gmail.com>
+#          Blake Caldwell <blake_caldwell@brown.edu>
 
 import itertools as it
 import numpy as np
-
-from neuron import h
 
 from .feed import ExtFeed
 from .pyramidal import L2Pyr, L5Pyr
@@ -21,8 +20,6 @@ class Network(object):
     ----------
     params : dict
         The parameters
-    n_jobs : int
-        The number of jobs to run in parallel
 
     Attributes
     ----------
@@ -44,10 +41,7 @@ class Network(object):
         The list contains the cell IDs of neurons that spiked.
     """
 
-    def __init__(self, params, n_jobs=1):
-        from .parallel import create_parallel_context
-        # setup simulation (ParallelContext)
-        create_parallel_context(n_jobs=n_jobs)
+    def __init__(self, params):
 
         # set the params internally for this net
         # better than passing it around like ...
@@ -59,11 +53,7 @@ class Network(object):
 
         self.N_t = np.arange(0., self.params['tstop'],
                              self.params['dt']).size + 1
-        # Create a h.Vector() with size 1xself.N_t, zero'd
-        self.current = {
-            'L5Pyr_soma': h.Vector(self.N_t, 0),
-            'L2Pyr_soma': h.Vector(self.N_t, 0),
-        }
+
         # int variables for grid of pyramidal cells (for now in both L2 and L5)
         self.gridpyr = {
             'x': self.params['N_pyr_x'],
@@ -106,7 +96,6 @@ class Network(object):
         # assign gid to hosts, creates list of gids for this node in _gid_list
         # _gid_list length is number of cells assigned to this id()
         self._gid_list = []
-        self._gid_assign()
         # create cells (and create self.origin in create_cells_pyr())
         self.cells = []
         self.extinput_list = []
@@ -418,6 +407,8 @@ class Network(object):
 
     def state_init(self):
         """Initializes the state closer to baseline."""
+        from neuron import h
+
         for cell in self.cells:
             seclist = h.SectionList()
             seclist.wholetree(sec=cell.soma)
@@ -518,3 +509,66 @@ class Network(object):
         if show:
             plt.show()
         return ax.get_figure()
+
+    def build_in_neuron(self):
+        """This function must be called before Network can be used for sims"""
+
+        from neuron import h
+        from .parallel import create_parallel_context
+        from .parallel import clear_last_network_objects
+
+        # make sure ParallelContext has been created (needed for joblibs)
+        create_parallel_context()
+
+        clear_last_network_objects(self)
+
+        self._gid_assign()
+        # Create a h.Vector() with size 1xself.N_t, zero'd
+        self.current = {
+            'L5Pyr_soma': h.Vector(self.N_t, 0),
+            'L2Pyr_soma': h.Vector(self.N_t, 0),
+        }
+        self._create_all_src()
+        self.state_init()
+        self._parnet_connect()
+        # set to record spikes
+        self.spiketimes = h.Vector()
+        self.spikegids = h.Vector()
+        self._record_spikes()
+        # position cells in 2D grid
+        self.move_cells_to_pos()
+
+    def _clear_neuron_objects(self):
+        """
+        Clear up NEURON internal gid information.
+
+        Note: This function must be called from the context of the
+        Network instance that ran build_in_neuron. This is a bug or
+        peculiarity of NEURON. If this function is called from a different
+        context, then the next simulation will run very slow because nrniv
+        workers are still going for the old simulation. If pc.gid_clear is
+        called from the right context, then those workers can exit.
+        """
+        from .parallel import pc
+
+        pc.gid_clear()
+
+        # dereference cell and NetConn objects
+        for gid, cell in zip(self._gid_list, self.cells):
+            # only work on cells on this node
+            if pc.gid_exists(gid):
+                for name_src in ['L2Pyr', 'L2Basket', 'L5Pyr', 'L5Basket',
+                                 'extinput', 'extgauss', 'extpois', 'ev']:
+                    for nc in getattr(cell, 'ncfrom_%s' % name_src):
+                        if nc.valid():
+                            # delete NEURON cell object
+                            cell_obj1 = nc.precell(gid)
+                            if cell_obj1 is not None:
+                                del cell_obj1
+                            cell_obj2 = nc.postcell(gid)
+                            if cell_obj2 is not None:
+                                del cell_obj2
+                            del nc
+
+        self._gid_list = []
+        self.cells = []
