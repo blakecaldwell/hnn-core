@@ -13,7 +13,7 @@ def test_network():
     params_fname = op.join(hnn_core_root, 'param', 'default.json')
     params = read_params(params_fname)
     net = Network(deepcopy(params))
-    net.build_in_neuron()
+    net.build_in_neuron()  # needed to populate net.cells
     for p in params:
         assert params[p] == net.params[p]
     assert len(params) == len(net.params)
