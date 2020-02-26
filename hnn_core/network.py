@@ -118,6 +118,21 @@ class Network(object):
 
         print('Building the NEURON model')
         from neuron import h
+        from .parallel import create_parallel_context
+        from .parallel import clear_last_network_objects
+
+        # make sure ParallelContext has been created (needed for joblibs)
+        create_parallel_context()
+
+        clear_last_network_objects(self)
+
+        self._gid_assign()
+        # Create a h.Vector() with size 1xself.N_t, zero'd
+        self.current = {
+            'L5Pyr_soma': h.Vector(self.N_t, 0),
+            'L2Pyr_soma': h.Vector(self.N_t, 0),
+        }
+
         self._create_all_src()
         self.state_init()
         self._parnet_connect()
@@ -509,34 +524,6 @@ class Network(object):
         if show:
             plt.show()
         return ax.get_figure()
-
-    def build_in_neuron(self):
-        """This function must be called before Network can be used for sims"""
-
-        from neuron import h
-        from .parallel import create_parallel_context
-        from .parallel import clear_last_network_objects
-
-        # make sure ParallelContext has been created (needed for joblibs)
-        create_parallel_context()
-
-        clear_last_network_objects(self)
-
-        self._gid_assign()
-        # Create a h.Vector() with size 1xself.N_t, zero'd
-        self.current = {
-            'L5Pyr_soma': h.Vector(self.N_t, 0),
-            'L2Pyr_soma': h.Vector(self.N_t, 0),
-        }
-        self._create_all_src()
-        self.state_init()
-        self._parnet_connect()
-        # set to record spikes
-        self.spiketimes = h.Vector()
-        self.spikegids = h.Vector()
-        self._record_spikes()
-        # position cells in 2D grid
-        self.move_cells_to_pos()
 
     def _clear_neuron_objects(self):
         """
