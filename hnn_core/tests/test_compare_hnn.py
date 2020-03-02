@@ -27,7 +27,7 @@ def test_hnn_core(n_jobs=1):
 
     # run the simulation
     net = Network(params)
-    dpl = simulate_dipole(net, n_jobs=n_jobs)[0]
+    dpl = simulate_dipole(net, n_trials=1, n_jobs=n_jobs)[0]
 
     if get_rank() == 0:
         # write the dipole to a file and compare

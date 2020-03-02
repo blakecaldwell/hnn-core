@@ -16,12 +16,25 @@ def _hammfilt(x, winsz):
     return convolve(x, win, 'same')
 
 
-def _clone_and_simulate(net, trial_idx):
+def _clone_and_simulate(net, trial_idx, n_jobs):
 
-    if trial_idx != 0:
-        net.params['prng_*'] = trial_idx
-
-    net.build()
+    if n_jobs > 1:
+        # for joblibs (separate processes)
+        net.build()
+        for _ in range(1, trial_idx):
+            # make sure network state is consistent
+            net.state_init()
+            # for reproducibility of original HNN results
+            net.reset_src_event_times()
+    else:
+        # without joblibs
+        if trial_idx == 0:
+            net.build()
+        else:
+            # make sure network state is consistent
+            net.state_init()
+            # for reproducibility of original HNN results
+            net.reset_src_event_times()
 
     return _simulate_single_trial(net)
 
@@ -108,7 +121,7 @@ def _simulate_single_trial(net):
     return dpl, net.spiketimes.to_python(), net.spikegids.to_python()
 
 
-def simulate_dipole(net, n_trials=1, n_jobs=1):
+def simulate_dipole(net, n_trials=None, n_jobs=1):
     """Simulate a dipole given the experiment parameters.
 
     Parameters
@@ -116,7 +129,7 @@ def simulate_dipole(net, n_trials=1, n_jobs=1):
     net : Network object
         The Network object specifying how cells are
         connected.
-    n_trials : int
+    n_trials : int | None
         The number of trials to simulate.
     n_jobs : int
         The number of jobs to run in parallel.
@@ -141,8 +154,11 @@ def simulate_dipole(net, n_trials=1, n_jobs=1):
                              " > 1)\n"
                              "or multiple cores per simulation (with MPI)\n")
 
+    if n_trials is None:
+        n_trials = net.params['N_trials']
+
     parallel, myfunc = _parallel_func(_clone_and_simulate, n_jobs=n_jobs)
-    out = parallel(myfunc(net, idx) for idx in range(n_trials))
+    out = parallel(myfunc(net, idx, n_jobs) for idx in range(n_trials))
     dpl, spiketimes, spikegids = zip(*out)
 
     net.spiketimes = spiketimes

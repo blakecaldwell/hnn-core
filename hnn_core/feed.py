@@ -50,6 +50,14 @@ class ExtFeed(object):
         s = 'seed %d, gid %d' % (self.seed, self.gid)
         return '<%s | %s>' % (class_name, s)
 
+    def inc_prng(self, inc):
+        # inc random number generator seeds
+        self.seed += inc
+        self.prng = np.random.RandomState(self.seed)
+        if hasattr(self, 'seed2'):
+            self.seed2 += inc
+            self.prng2 = np.random.RandomState(self.seed2)
+
     def set_prng(self, seed=None):
         if seed is None:  # no seed specified then use p_ext to determine seed
             # random generator for this instance
@@ -76,13 +84,13 @@ class ExtFeed(object):
             self.prng2 = np.random.RandomState(self.seed2)
         # print('ty,seed:',self.ty,self.seed)
 
-    def set_event_times(self, inc_evinput=0.0):
+    def set_event_times(self):
         # print('self.p_ext:',self.p_ext)
         # each of these methods creates self.eventvec for playback
         if self.ty == 'extpois':
             self.__create_extpois()
         elif self.ty.startswith(('evprox', 'evdist')):
-            self.__create_evoked(inc_evinput)
+            self.__create_evoked()
         elif self.ty == 'extgauss':
             self.__create_extgauss()
         elif self.ty == 'extinput':
@@ -131,13 +139,12 @@ class ExtFeed(object):
         return self.eventvec.size() > 0
 
     # mu and sigma vals come from p
-    def __create_evoked(self, inc=0.0):
+    def __create_evoked(self):
         if self.celltype in self.p_ext.keys():
             # assign the params
-            mu = self.p_ext['t0'] + inc
+            mu = self.p_ext['t0']
             sigma = self.p_ext[self.celltype][3]  # index 3 is sigma_t_ (stdev)
             numspikes = int(self.p_ext['numspikes'])
-            # print('mu:',mu,'sigma:',sigma,'inc:',inc)
             # if a non-zero sigma is specified
             if sigma:
                 val_evoked = self.prng.normal(mu, sigma, numspikes)

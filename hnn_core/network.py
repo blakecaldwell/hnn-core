@@ -116,13 +116,20 @@ class Network(object):
     def build(self):
         """Building the network in NEURON."""
 
-        print('Building the NEURON model')
         from neuron import h
         from .parallel import create_parallel_context
         from .parallel import clear_last_network_objects
 
         # make sure ParallelContext has been created (needed for joblibs)
         create_parallel_context()
+
+        from .parallel import pc, rank
+
+        # don't start building the network until all nodes are ready
+        pc.barrier()
+
+        if rank == 0:
+            print('Building the NEURON model')
 
         clear_last_network_objects(self)
 
@@ -142,7 +149,9 @@ class Network(object):
         self.spikegids = h.Vector()
         self._record_spikes()
         self.move_cells_to_pos()  # position cells in 2D grid
-        print('[Done]')
+
+        if rank == 0:
+            print('[Done]')
 
     def __enter__(self):
         """Context manager to cleanly build Network objects"""
@@ -304,6 +313,20 @@ class Network(object):
         for gidtype, gids in self.gid_dict.items():
             if gid in gids:
                 return gidtype
+
+    def reset_src_event_times(self):
+        """
+        Reset src (source/external) event times and change random seed
+        """
+
+        for feed in self.extinput_list:
+            feed.inc_prng(1000)
+            feed.set_event_times()  # uses feed.seed
+
+        for k, lfeed in self.ext_list.items():  # dictionary of lists...
+            for feed in lfeed:
+                feed.inc_prng(1)
+                feed.set_event_times()  # uses feed.seed
 
     def _create_all_src(self):
         """Parallel create cells AND external inputs (feeds)
