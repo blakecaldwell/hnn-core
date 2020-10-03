@@ -291,6 +291,7 @@ class L2Pyr(Pyr):
 
         # run record_current_soma(), defined in Cell()
         self.record_current_soma()
+        self.record_voltage_soma()
 
     # Returns hardcoded somatic properties
     def _get_soma_props(self, pos):
@@ -476,6 +477,7 @@ class L5Pyr(Pyr):
 
         # run record current soma, defined in Cell()
         self.record_current_soma()
+        self.record_voltage_soma()
 
     def basic_shape(self):
         """The shape of the neuron."""
