@@ -111,6 +111,8 @@ def _simulate_single_trial(neuron_net, trial_idx):
 
     _PC.barrier()  # get all nodes to this place before continuing
 
+    neuron_net._t_vec.copy(t_vec)
+
     dpl_data = np.c_[np.array(dp_rec_L2.to_python()) +
                      np.array(dp_rec_L5.to_python()),
                      np.array(dp_rec_L2.to_python()),
@@ -318,6 +320,7 @@ class NetworkBuilder(object):
         self._spiketimes = h.Vector()
         self._spikegids = h.Vector()
         self._vsoma = dict()
+        self._t_vec = h.Vector()
 
         # used by rank 0 for spikes across all procs (MPI)
         self._all_spiketimes = h.Vector()
@@ -741,7 +744,8 @@ class NetworkBuilder(object):
         data = (self._all_spiketimes.to_python(),
                 self._all_spikegids.to_python(),
                 deepcopy(self.net.gid_dict),
-                deepcopy(vsoma_py))
+                deepcopy(vsoma_py),
+                self._t_vec.to_python())
         return data
 
     def _clear_last_network_objects(self):
