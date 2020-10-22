@@ -63,6 +63,17 @@ def _gather_trial_data(sim_data, net, n_trials):
     return dpls
 
 
+def _read_all_bytes(fd, chunk_size=4096):
+    all_data = b""
+    while True:
+        data = os.read(fd, chunk_size)
+        all_data += data
+        if len(data) < chunk_size:
+            break
+
+    return all_data
+
+
 class JoblibBackend(object):
     """The JoblibBackend class.
 
@@ -240,7 +251,7 @@ class MPIBackend(object):
 
     def _read_data(self, fd, mask):
         """read from fd until data includes padding characters"""
-        data = os.read(fd, 4096)
+        data = _read_all_bytes(fd)
         self.proc_data_bytes += data
 
         # only _read_stdout gets a signal from the fd. the end of simulation
@@ -248,8 +259,8 @@ class MPIBackend(object):
         return None
 
     def _read_stdout(self, fd, mask):
-        """read from fd until receiving the process simulation is complete"""
-        data = os.read(fd, 4096)
+        """read stdout fd until receiving the process simulation is complete"""
+        data = _read_all_bytes(fd)
         if data:
             str_data = data.decode()
             if str_data == 'end_of_sim' or str_data.startswith('end_of_data'):
@@ -353,6 +364,7 @@ class MPIBackend(object):
         self.sel.register(pipe_stderr_r, selectors.EVENT_READ,
                           self._read_stdout)
 
+        data_len = 0
         # loop while the process is running
         while proc.poll() is None:
             # wait for an event on the selector, timeout after 1s
