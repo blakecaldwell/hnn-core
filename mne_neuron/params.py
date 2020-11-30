@@ -97,27 +97,10 @@ class Params(dict):
         return deepcopy(self)
 
 
-    def write(self, unique=True):
+    def write(self, fname):
         """Write the contents of params dictionary to a JSON file"""
 
         from os import makedirs, path
-        from hashlib import blake2b
-
-        # handle cases for determining filename
-        if 'task_index' in self:
-            fname = path.join('data', self['sim_prefix'],
-                                'params_%s.json' % self['task_index'])
-        elif unique:
-            m = blake2b(digest_size=8)
-            for k, v in sorted(self.items()):
-                m.update(str(v).encode('utf-8'))
-
-            unique_id = m.hexdigest()
-            fname = path.join('data', self['sim_prefix'],
-                                'params_%s.json' % unique_id)
-        else:
-            fname = path.join('data', self['sim_prefix'],
-                                'params.json')
         makedirs(path.dirname(fname), exist_ok=True)
 
         with open(fname, 'w') as json_out:

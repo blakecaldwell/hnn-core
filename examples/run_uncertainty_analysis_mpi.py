@@ -140,10 +140,12 @@ if rank == 0:
                 input_name = k.split('t_', 1)[1]
 
                 if 'timing_only' in include_weights or 'timing_and_weights' in include_weights:
-                    timing_min = max(0, v - timing_bound)
-                    timing_max = min(float(params_input['tstop']), v + timing_bound)
+                    sigma_name = 'sigma_%s' % param_input_name
+                    sigma = params_input[sigma_name]
+                    timing_min = max(0, v - 3*sigma)
+                    timing_max = min(float(params_input['tstop']), v + 3*sigma)
                     print("Varying %s in range[%.4f-%.4f]" % (k, timing_min, timing_max))
-                    parameters[k] = cp.Uniform(timing_min, timing_max)
+                    parameters[k] = cp.Normal(mu=v,sigma=sigma)
                 if 'weights_only' in include_weights or 'timing_and_weights' in include_weights:
                     for weight in ['L2Pyr_ampa', 'L2Pyr_nmda',
                                    'L2Basket_ampa', 'L2Basket_nmda',

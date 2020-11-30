@@ -132,7 +132,7 @@ class ExtFeed(object):
             mu = self.p_ext['t0'] + inc
             sigma = self.p_ext[self.celltype][3]  # index 3 is sigma_t_ (stdev)
             numspikes = int(self.p_ext['numspikes'])
-            # print('mu:',mu,'sigma:',sigma,'inc:',inc)
+            #print('mu:',mu,'sigma:',sigma,'inc:',inc, 'numspikes:',numspikes)
             # if a non-zero sigma is specified
             if sigma:
                 val_evoked = self.prng.normal(mu, sigma, numspikes)

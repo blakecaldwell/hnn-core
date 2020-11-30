@@ -113,15 +113,15 @@ def simulate_dipole(net, trial=0, verbose=True, extdata=None):
     # actual simulation - run the solver
     pc.psolve(h.tstop)
 
-    pc.barrier()
+    #pc.barrier()
 
     # these calls aggregate data across procs/nodes
     pc.allreduce(dp_rec_L2, 1)
     # combine dp_rec on every node, 1=add contributions together
     pc.allreduce(dp_rec_L5, 1)
     # aggregate the currents independently on each proc
-    net.aggregate_currents()
-    pc.barrier()
+    #net.aggregate_currents()
+    #pc.barrier()
     # combine net.current{} variables on each proc
     pc.allreduce(net.current['L5Pyr_soma'], 1)
     pc.allreduce(net.current['L2Pyr_soma'], 1)

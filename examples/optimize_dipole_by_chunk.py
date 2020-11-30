@@ -412,7 +412,8 @@ except MPI.Exception:
     ###############################################################################
     # Read the dipole data file to compare against
 
-    exp_data = np.loadtxt('S1_SupraT.txt')
+    exp_fname = environ['EXP_FNAME']
+    exp_data = np.loadtxt(exp_fname)
 
     verbose = True
 
@@ -479,7 +480,7 @@ for chunk in chunks:
     all_inputs = list(set(chunk['inputs'] + all_inputs))
 
 
-custom='_local_long'
+custom='_local'
 cumulative_rmse = 1e9
 weights = [None]*3
 weights[0] = np.zeros(num_step)
@@ -531,7 +532,7 @@ for index, chunk in enumerate(chunks):
     print('optimizing from [%3.3f-%3.3f]' % (params_input['opt_start'], params_input['opt_end']))
     num_params = len(params_input['opt_params'])
     opt = nlopt.opt(algorithm, num_params)
-    opt_results = optimize(params_input, 200)
+    opt_results = optimize(params_input, 50)
 
     old_params = {}
     # update params
@@ -573,7 +574,7 @@ params_input['opt_params'] = set_parameters(include_weights)
 print('optimizing from [%3.3f-%3.3f]' % (params_input['opt_start'], params_input['opt_end']))
 num_params = len(params_input['opt_params'])
 opt = nlopt.opt(algorithm, num_params)
-opt_results = optimize(params_input, 1000)
+opt_results = optimize(params_input, 50)
 
 # update params
 for var_name, value in zip(params_input['opt_params'].keys(), opt_results):
